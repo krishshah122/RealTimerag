@@ -1,0 +1,54 @@
+# ============ Python ============
+# Virtual environments
+meenv/
+venv/
+.venv/
+env/
+.env
+
+# Bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+*.egg
+
+# ============ Secrets & env ============
+.env
+rag/.env
+.env.local
+.env.*.local
+*.pem
+
+# ============ Node / Frontend ============
+node_modules/
+rag/frontend/node_modules/
+dist/
+rag/frontend/dist/
+*.local
+
+# ============ Data & indexes (regenerate locally) ============
+rag/data/faiss.index
+rag/data/docs.json
+# Keep version.txt if you want; uncomment to ignore:
+# rag/data/
+
+# ============ Logs & temp ============
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# ============ IDE / Editor ============
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ============ Optional (uncomment if needed) ============
+# rag/data/version.txt
+# .vscode/
