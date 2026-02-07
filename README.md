@@ -82,6 +82,13 @@ Real-Time RAG provides:
 - **CORS** — Frontend (Vite dev server) talks to FastAPI on port 8000
 
 ---
+<p float="left">
+  <img src="C:\Users\kriss\OneDrive\Desktop\realtimerag\rag\assets\Screenshot 2026-02-07 115009.png" width="45%" />
+  <img src="rag/assets/Screenshot 2026-02-07 115020.png" width="45%" />
+</p>
+
+*Backend FastAPI API (left) | Frontend React UI (right)*
+
 
 ## 🏗️ Architecture
 
