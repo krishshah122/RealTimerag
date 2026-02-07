@@ -1,0 +1,1 @@
+# Keeps rag/data/ in git; faiss.index and docs.json are in .gitignore

@@ -1,0 +1,10 @@
+# fastapi
+# uvicorn
+# langchain
+# langgraph
+# faiss-cpu
+# sentence-transformers
+# # groq
+# # kafka-python
+rank-bm25
+# # python-dotenv
