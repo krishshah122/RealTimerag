@@ -2,7 +2,7 @@
 
 ### _Ask questions over a live stream of operational issues—answers grounded in up-to-date context, no restarts._
 
-**Python • FastAPI • React • LangGraph • FAISS • Kafka • Groq**
+**Python • FastAPI • React • LangGraph • FAISS • Kafka • Groq • LangSmith**
 
 **Purpose-Built Hybrid Retrieval with Real-Time Ingestion and Async Indexing**
 
@@ -19,6 +19,7 @@ Features • Architecture • Quick Start • API • Contributing
 - [Quick Start](#-quick-start)
 - [Usage Guide](#-usage-guide)
 - [API Documentation](#-api-documentation)
+- [Observability (LangSmith)](#-observability-langsmith)
 - [Project Structure](#-project-structure)
 - [Pushing to GitHub](#-pushing-to-github)
 - [Contributing](#-contributing)
@@ -80,6 +81,12 @@ Real-Time RAG provides:
 - **Ask panel** — Type a question, get an answer grounded in live issues
 - **Plain-text API** — `POST /ask` with body as raw query string
 - **CORS** — Frontend (Vite dev server) talks to FastAPI on port 8000
+
+**📊 Observability (LangSmith)**
+
+- **Tracing** — Retrieval and answer steps are traced with `@traceable` so you can inspect latency and inputs/outputs in [LangSmith](https://smith.langchain.com/).
+- **Instrumented components** — Embeddings, dense/sparse retrieval, RRF, rerank, vector store, and the retrieve/answer nodes are all traced.
+- **Optional** — Set `LANGSMITH_TRACING=true` and `LANGCHAIN_API_KEY` (or LangSmith API key) in `.env` to enable; leave unset to run without tracing.
 
 ---
 <p float="left">
@@ -151,10 +158,14 @@ graph LR
 - **Apache Kafka** (Redpanda) — Topic `live_issues`; producer in API, consumer for indexing
 - **Persistence** — `data/faiss.index`, `data/docs.json`, `data/version.txt`
 
+### Observability
+
+- **[LangSmith](https://smith.langchain.com/)** — Tracing for retrieval and generation; `@traceable` on embeddings, dense/sparse retrieval, RRF, rerank, vector store, and graph nodes.
+
 ### Libraries & Tools
 
 - **Uvicorn** — ASGI server
-- **python-dotenv** — Environment variables (e.g. `GROQ_API_KEY`)
+- **python-dotenv** — Environment variables (e.g. `GROQ_API_KEY`, LangSmith)
 - **kafka-python** — Producer and consumer clients
 
 ---
@@ -167,6 +178,7 @@ graph LR
 - **Node.js** (for frontend)
 - **Docker** (for Redpanda / Kafka)
 - **Groq API key** — [Groq](https://groq.com/)
+- **LangSmith API key** (optional) — [LangSmith](https://smith.langchain.com/) for tracing and observability
 
 ### Installation
 
@@ -182,7 +194,7 @@ cd realtimerag/rag
 ```bash
 python -m venv venv
 source venv/bin/activate   # Windows: venv\Scripts\activate
-pip install fastapi uvicorn langgraph faiss-cpu sentence-transformers groq kafka-python rank-bm25 python-dotenv
+pip install fastapi uvicorn langgraph faiss-cpu sentence-transformers groq kafka-python rank-bm25 python-dotenv langsmith
 ```
 
 3️⃣ **Set up environment variables**
@@ -191,6 +203,11 @@ Create `rag/.env`:
 
 ```env
 GROQ_API_KEY=your_groq_api_key_here
+
+# Optional: LangSmith tracing (get API key at https://smith.langchain.com/)
+LANGSMITH_TRACING=true
+LANGCHAIN_API_KEY=your_langsmith_api_key_here
+LANGCHAIN_PROJECT=My-RealTime-RAG
 ```
 
 4️⃣ **Start Kafka (Redpanda)**
@@ -339,6 +356,40 @@ curl -X POST http://127.0.0.1:8000/ask \
 
 ---
 
+## 📊 Observability (LangSmith)
+
+The app is instrumented with **[LangSmith](https://smith.langchain.com/)** so you can trace each `/ask` request and see latency, inputs, and outputs for retrieval and generation.
+
+### What gets traced
+
+| Component | Decorator | What you see in LangSmith |
+|-----------|-----------|---------------------------|
+| **retrieve_node** | `@traceable(name="retrieve_node")` | Query, loaded store, and top 3 docs |
+| **answer_node** | `@traceable` | Context, prompt, and LLM response |
+| **Embeddings** | `@traceable(name="embeddingsload")` | Model load and encode calls |
+| **DenseRetriever** | `@traceable` | FAISS search inputs/outputs |
+| **SparseRetriever (BM25)** | `@traceable` | BM25 search |
+| **RRF / rerank** | `@traceable` | Fusion and rerank steps |
+| **VectorStore** | `@traceable` | Load from disk and search |
+
+### Enable tracing
+
+1. Get an API key at [smith.langchain.com](https://smith.langchain.com/).
+2. In `rag/.env` add:
+   ```env
+   LANGSMITH_TRACING=true
+   LANGCHAIN_API_KEY=your_langsmith_api_key
+   LANGCHAIN_PROJECT=My-RealTime-RAG
+   ```
+3. Restart the backend. On startup you should see e.g. `LangSmith enabled: true` and `Project: My-RealTime-RAG`.
+4. Run a few `/ask` requests; traces appear under your project in the LangSmith dashboard.
+
+### Disable tracing
+
+Leave `LANGSMITH_TRACING` unset or set it to `false`. The app runs normally without sending any data to LangSmith.
+
+---
+
 ## 📁 Project Structure
 
 ```
@@ -448,6 +499,7 @@ This project is licensed under the **MIT License** — use and adapt as needed. 
 
 - **[FastAPI](https://fastapi.tiangolo.com/)** for the modern Python API framework
 - **[LangChain / LangGraph](https://langchain-ai.github.io/langgraph/)** for the retrieve–answer orchestration
+- **[LangSmith](https://smith.langchain.com/)** for tracing and observability
 - **[FAISS](https://github.com/facebookresearch/faiss)** for efficient vector search
 - **[Groq](https://groq.com/)** for fast LLM inference
 - **[Redpanda](https://redpanda.com/)** for Kafka-compatible streaming
