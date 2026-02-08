@@ -1,9 +1,14 @@
 from fastapi import FastAPI, Body
 from fastapi.middleware.cors import CORSMiddleware
-
 from core.vector_store import VectorStore
 from agents.graph import build_graph
 from app.issues import router as issue_router
+from dotenv import load_dotenv
+load_dotenv()   # MUST be first
+
+import os
+print("LangSmith enabled:", os.getenv("LANGSMITH_TRACING"))
+print("Project:", os.getenv("LANGSMITH_PROJECT"))
 
 app = FastAPI()
 

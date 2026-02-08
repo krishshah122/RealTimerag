@@ -7,6 +7,7 @@ from groq import Groq
 from config import LLM_MODEL
 from dotenv import load_dotenv
 import os
+from langsmith import traceable
 
 load_dotenv()
 
@@ -15,7 +16,7 @@ client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 if not os.getenv("GROQ_API_KEY"):
     raise RuntimeError("GROQ_API_KEY not set")
 
-
+@traceable(name="retrieve_node")
 def retrieve_node(state, _):
     """
     Always load the latest VectorStore from disk.

@@ -1,3 +1,5 @@
+from langsmith import traceable
+@traceable(name="rrfretriver")
 def rrf(dense, sparse, k=60):
     scores = {}
 

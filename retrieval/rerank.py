@@ -1,6 +1,6 @@
 import string
 import re
-
+from langsmith import traceable
 def clean_text(text):
 
     text = text.lower()
@@ -9,6 +9,7 @@ def clean_text(text):
     # 3. Optional: Remove extra whitespace
     return text.strip()
 
+@traceable(name="reranking")
 def simple_rerank(query, docs):
     query_words = set(clean_text(query).split())
     scored = []

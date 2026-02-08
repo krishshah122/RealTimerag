@@ -5,7 +5,8 @@ from core.document_store import DocumentStore
 from config import EMBEDDING_DIM
 from core.persistence import load, save, current_version
 
-
+from langsmith import traceable
+@traceable(name="vecstore")
 class VectorStore:
     def __init__(self):
         self._load_from_disk()

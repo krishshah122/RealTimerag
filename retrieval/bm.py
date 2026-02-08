@@ -1,5 +1,6 @@
 from rank_bm25 import BM25Okapi
-
+from langsmith import traceable
+@traceable(name="sparseretriver")
 class SparseRetriever:
     def __init__(self, documents):
         self.docs = documents
