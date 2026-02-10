@@ -8,3 +8,8 @@ groq
 kafka-python
 rank-bm25
 python-dotenv
+sqlalchemy
+passlib[bcrypt]
+python-jose[cryptography]
+ multipart
+ supabase-py

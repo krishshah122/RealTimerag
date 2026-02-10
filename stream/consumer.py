@@ -18,9 +18,12 @@ for message in consumer:
     event = message.value
     print("Received:", event)
 
-    store.add_document(
-        text=event["text"],
-        metadata=event.get("metadata", {})
-    )
+    # Ensure team_tag (if present) is persisted into document metadata
+    metadata = event.get("metadata", {}) or {}
+    team_tag = event.get("team_tag")
+    if team_tag:
+        metadata.setdefault("team_tag", team_tag)
+
+    store.add_document(text=event["text"], metadata=metadata)
 
     print("Stored in vector DB ✅")
