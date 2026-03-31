@@ -26,7 +26,8 @@ export default function Simulation() {
         {
             id: "jira-bug",
             label: "Jira: Critical Bug",
-            color: "#3b82f6", // Blue
+            icon: "🐛",
+            color: "#3b82f6",
             data: {
                 text: "Checkout page returns 500 error when user clicks 'Pay Now'. Payment gateway timeout.",
                 type: "bug",
@@ -40,7 +41,8 @@ export default function Simulation() {
         {
             id: "pd-alert",
             label: "PagerDuty: DB High CPU",
-            color: "#ef4444", // Red
+            icon: "🔴",
+            color: "#ef4444",
             data: {
                 text: "CRITICAL: Database primary node (db-01) CPU usage > 95% for 5 minutes.",
                 type: "alert",
@@ -54,7 +56,8 @@ export default function Simulation() {
         {
             id: "jenkins-deploy",
             label: "Jenkins: Deploy Failed",
-            color: "#f59e0b", // Amber
+            icon: "🚀",
+            color: "#f59e0b",
             data: {
                 text: "Deployment #8841 to production failed. Health check timed out after 300s.",
                 type: "deployment",
@@ -68,7 +71,8 @@ export default function Simulation() {
         {
             id: "splunk-log",
             label: "Splunk: Security Warning",
-            color: "#10b981", // Emerald
+            icon: "🛡️",
+            color: "#10b981",
             data: {
                 text: "Multiple failed login attempts detected from IP 192.168.1.55 (Brute Force Pattern).",
                 type: "security_event",
@@ -102,7 +106,6 @@ export default function Simulation() {
 
             if (!response.ok) throw new Error("Failed to log issue");
 
-            // Add to local log
             const logEntry = {
                 time: new Date().toLocaleTimeString(),
                 message: `Triggered ${scenario.label}`,
@@ -124,60 +127,86 @@ export default function Simulation() {
     }
 
     return (
-        <div className="container" style={{ maxWidth: '800px', margin: '0 auto', padding: '20px' }}>
-            <h2 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '20px', color: '#1f2937' }}>
-                🛠️ Incident Simulation
-            </h2>
-            <p style={{ color: '#4b5563', marginBottom: '30px' }}>
-                Simulate automated events from external tools. These incidents will be
-                ingested by the RAG system and tagged with your current team.
-            </p>
-
-            <div style={{ backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', padding: '12px', borderRadius: '8px', marginBottom: '20px', color: '#1e40af' }}>
-                <strong>Current Context:</strong> You are simulating events for Team <span style={{ textTransform: 'uppercase', fontWeight: 'bold' }}>{team}</span>.
+        <div className="ask-page" style={{ alignItems: 'stretch', maxWidth: 960, margin: '0 auto' }}>
+            {/* Hero */}
+            <div className="ask-hero" style={{ textAlign: 'left', maxWidth: '100%' }}>
+                <span className="ask-hero-icon" style={{ fontSize: 40 }}>🛠️</span>
+                <h1 style={{ fontSize: 36 }}>Incident Simulation</h1>
+                <p>
+                    Simulate automated events from external tools. These incidents will be
+                    ingested by the RAG system and tagged with your current team.
+                </p>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '40px' }}>
+            {/* Team Context Banner */}
+            <div className="glass-card" style={{ 
+                display: 'flex', alignItems: 'center', gap: 12, 
+                marginBottom: 28, padding: '16px 24px',
+                background: 'rgba(99,102,241,0.08)', 
+                borderColor: 'rgba(99,102,241,0.2)' 
+            }}>
+                <span style={{ fontSize: 20 }}>👤</span>
+                <span style={{ color: 'var(--text-secondary)', fontSize: 14 }}>
+                    <strong style={{ color: 'var(--text-accent)' }}>Current Context:</strong> Simulating events for Team{' '}
+                    <strong style={{ color: 'var(--text-primary)', textTransform: 'uppercase' }}>{team}</strong>
+                </span>
+            </div>
+
+            {/* Scenario Buttons */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14, marginBottom: 36 }}>
                 {scenarios.map(scenario => (
                     <button
                         key={scenario.id}
                         onClick={() => triggerScenario(scenario)}
                         disabled={loading}
                         style={{
-                            padding: '16px',
-                            backgroundColor: scenario.color,
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '8px',
-                            fontWeight: '600',
+                            padding: '20px 16px',
+                            background: `linear-gradient(135deg, ${scenario.color}22, ${scenario.color}11)`,
+                            border: `1px solid ${scenario.color}44`,
+                            color: 'var(--text-primary)',
+                            borderRadius: 'var(--radius-md)',
+                            fontWeight: 600,
+                            fontSize: 14,
                             cursor: loading ? 'not-allowed' : 'pointer',
-                            opacity: loading ? 0.7 : 1,
-                            transition: 'transform 0.1s',
+                            opacity: loading ? 0.5 : 1,
+                            transition: 'all 0.2s',
                             display: 'flex',
                             flexDirection: 'column',
                             alignItems: 'center',
-                            gap: '8px'
+                            gap: 10,
+                            fontFamily: 'inherit',
                         }}
-                        onMouseOver={(e) => !loading && (e.currentTarget.style.transform = 'scale(1.02)')}
-                        onMouseOut={(e) => !loading && (e.currentTarget.style.transform = 'scale(1)')}
+                        onMouseOver={(e) => {
+                            if (!loading) {
+                                e.currentTarget.style.transform = 'translateY(-3px)';
+                                e.currentTarget.style.boxShadow = `0 8px 24px ${scenario.color}33`;
+                            }
+                        }}
+                        onMouseOut={(e) => {
+                            if (!loading) {
+                                e.currentTarget.style.transform = 'translateY(0)';
+                                e.currentTarget.style.boxShadow = 'none';
+                            }
+                        }}
                     >
+                        <span style={{ fontSize: 28 }}>{scenario.icon}</span>
                         <span>{scenario.label}</span>
                     </button>
                 ))}
             </div>
 
             {/* Manual Entry Section */}
-            <div style={{ background: 'white', padding: '24px', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)', marginBottom: '40px' }}>
-                <h3 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '16px', color: '#1f2937' }}>
-                    ✍️ Log Custom Issue
-                </h3>
-                <p style={{ color: '#6b7280', marginBottom: '20px' }}>
+            <div className="glass-card" style={{ marginBottom: 36 }}>
+                <div className="section-title blue" style={{ fontSize: 18 }}>
+                    <span className="icon">✍️</span>
+                    Log Custom Issue
+                </div>
+                <p style={{ color: 'var(--text-secondary)', marginBottom: 20, fontSize: 14 }}>
                     Type a human-readable description. The system will automatically format it as a structured JSON incident for your team.
                 </p>
                 <form onSubmit={(e) => {
                     e.preventDefault();
                     const formData = new FormData(e.target);
-                    // Construct the JSON payload
                     const customScenario = {
                         label: "Custom Issue",
                         data: {
@@ -192,20 +221,29 @@ export default function Simulation() {
                     triggerScenario(customScenario);
                     e.target.reset();
                 }}>
-                    <div style={{ display: 'grid', gap: '16px', marginBottom: '16px' }}>
+                    <div style={{ display: 'grid', gap: 16, marginBottom: 16 }}>
                         <div>
-                            <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: '#374151' }}>Issue Description</label>
+                            <label style={{ display: 'block', marginBottom: 6, fontWeight: 600, color: 'var(--text-secondary)', fontSize: 13 }}>Issue Description</label>
                             <textarea
                                 name="text"
                                 required
                                 placeholder="e.g., 'The payment API is returning 500 errors intermittently.'"
-                                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #d1d5db', minHeight: '80px' }}
+                                style={{
+                                    width: '100%', padding: 14, borderRadius: 'var(--radius-sm)',
+                                    border: '1px solid var(--border-color)', minHeight: 80,
+                                    background: 'var(--bg-input)', color: 'var(--text-primary)',
+                                    fontFamily: 'inherit', fontSize: 14, resize: 'vertical', outline: 'none'
+                                }}
                             />
                         </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                             <div>
-                                <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: '#374151' }}>Type</label>
-                                <select name="type" style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #d1d5db' }}>
+                                <label style={{ display: 'block', marginBottom: 6, fontWeight: 600, color: 'var(--text-secondary)', fontSize: 13 }}>Type</label>
+                                <select name="type" style={{
+                                    width: '100%', padding: 12, borderRadius: 'var(--radius-sm)',
+                                    border: '1px solid var(--border-color)', background: 'var(--bg-input)',
+                                    color: 'var(--text-primary)', fontFamily: 'inherit', fontSize: 14, outline: 'none'
+                                }}>
                                     <option value="incident">Incident</option>
                                     <option value="bug">Bug Report</option>
                                     <option value="deployment">Deployment</option>
@@ -213,8 +251,12 @@ export default function Simulation() {
                                 </select>
                             </div>
                             <div>
-                                <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: '#374151' }}>Severity</label>
-                                <select name="severity" style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #d1d5db' }}>
+                                <label style={{ display: 'block', marginBottom: 6, fontWeight: 600, color: 'var(--text-secondary)', fontSize: 13 }}>Severity</label>
+                                <select name="severity" style={{
+                                    width: '100%', padding: 12, borderRadius: 'var(--radius-sm)',
+                                    border: '1px solid var(--border-color)', background: 'var(--bg-input)',
+                                    color: 'var(--text-primary)', fontFamily: 'inherit', fontSize: 14, outline: 'none'
+                                }}>
                                     <option value="low">Low</option>
                                     <option value="medium">Medium</option>
                                     <option value="high">High</option>
@@ -227,43 +269,41 @@ export default function Simulation() {
                         type="submit"
                         disabled={loading}
                         style={{
-                            width: '100%',
-                            padding: '12px',
-                            backgroundColor: '#4f46e5',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '8px',
-                            fontWeight: '600',
+                            width: '100%', padding: 14,
+                            background: 'var(--gradient-primary)',
+                            color: 'white', border: 'none',
+                            borderRadius: 'var(--radius-sm)',
+                            fontWeight: 700, fontSize: 15,
                             cursor: loading ? 'not-allowed' : 'pointer',
-                            opacity: loading ? 0.7 : 1
+                            opacity: loading ? 0.5 : 1,
+                            fontFamily: 'inherit',
+                            boxShadow: '0 4px 14px rgba(99,102,241,0.35)',
+                            transition: 'all 0.15s'
                         }}
                     >
-                        {loading ? 'Logging Issue...' : 'Log Issue'}
+                        {loading ? 'Logging Issue...' : 'Log Issue →'}
                     </button>
                 </form>
             </div>
 
-            <div className="simulation-logs" style={{ background: '#f3f4f6', padding: '20px', borderRadius: '12px' }}>
-                <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '12px', color: '#374151' }}>
+            {/* Live Event Log */}
+            <div className="glass-card">
+                <div className="section-title green" style={{ fontSize: 18 }}>
+                    <span className="icon">📡</span>
                     Live Event Log
-                </h3>
+                </div>
                 {logs.length === 0 ? (
-                    <p style={{ color: '#9ca3af', fontStyle: 'italic' }}>No events triggered yet.</p>
+                    <div className="empty-state">No events triggered yet.</div>
                 ) : (
-                    <ul style={{ listStyle: 'none', padding: 0 }}>
+                    <div>
                         {logs.map((log, idx) => (
-                            <li key={idx} style={{
-                                padding: '8px 0',
-                                borderBottom: '1px solid #e5e7eb',
-                                color: log.isError ? '#dc2626' : '#059669',
-                                fontFamily: 'monospace'
-                            }}>
-                                <span style={{ color: '#6b7280', marginRight: '10px' }}>[{log.time}]</span>
-                                <strong>{log.message}</strong>
-                                {!log.isError && <span style={{ marginLeft: '10px', color: '#4b5563' }}>({log.details})</span>}
-                            </li>
+                            <div key={idx} className="list-item" style={{ fontFamily: "'Inter', monospace", fontSize: 13 }}>
+                                <span style={{ color: 'var(--text-muted)', marginRight: 10 }}>[{log.time}]</span>
+                                <strong style={{ color: log.isError ? '#f87171' : '#34d399' }}>{log.message}</strong>
+                                {!log.isError && <span style={{ marginLeft: 10, color: 'var(--text-secondary)' }}>({log.details})</span>}
+                            </div>
                         ))}
-                    </ul>
+                    </div>
                 )}
             </div>
         </div>

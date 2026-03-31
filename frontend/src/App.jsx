@@ -6,6 +6,7 @@ import TeamDashboard from "./components/TeamDashboard";
 import ProtectedRoute from "./components/ProtectedRoute";
 import Signup from "./components/Signup";
 import Simulation from "./components/Simulation";
+import { AnalyticsPage } from "./AnalyticsPage";
 import "./styles.css";
 
 function App() {
@@ -44,6 +45,16 @@ function App() {
             element={
               <ProtectedRoute>
                 <TeamDashboard />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Analytics route (Protected) */}
+          <Route
+            path="/analytics"
+            element={
+              <ProtectedRoute>
+                <AnalyticsPage />
               </ProtectedRoute>
             }
           />

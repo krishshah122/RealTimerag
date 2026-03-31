@@ -4,10 +4,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from core.vector_store import VectorStore
 from agents.graph import build_graph
 from app.issues import router as issue_router
+from app.analytics import router as analytics_router
+from core.analytics import AnalyticsManager
 from dotenv import load_dotenv
 from langsmith import traceable
 from langsmith.run_helpers import set_run_metadata
 from app.auth import auth_middleware, get_current_user, UserContext, supabase
+import time
 
 load_dotenv()   # MUST be first
 
@@ -31,6 +34,8 @@ app.add_middleware(
 )
 
 app.include_router(issue_router)
+app.include_router(analytics_router)
+
 
 class RegisterRequest(BaseModel):
     email: str
@@ -38,31 +43,40 @@ class RegisterRequest(BaseModel):
     team: str
 
 @app.post("/register")
-def register_user(req: RegisterRequest):
+async def register_user(req: RegisterRequest):
     if not supabase:
         raise HTTPException(500, "Supabase not configured")
 
     # 1. Create User in Supabase Auth
     try:
         # admin.create_user auto-confirms email if configured, or sends email
-        user_res = supabase.auth.admin.create_user({
-            "email": req.email,
-            "password": req.password,
-            "email_confirm": True
-        })
+        # This is a network call, but supabase python client is sync.
+        # Ideally we wrap this too, but for registration (low volume), it matters less than /ask.
+        # But for consistency, let's wrap it.
+        import asyncio
+        user_res = await asyncio.to_thread(
+            lambda: supabase.auth.admin.create_user({
+                "email": req.email,
+                "password": req.password,
+                "email_confirm": True
+            })
+        )
         user = user_res.user
     except Exception as e:
         # Check for specific error messages if possible, or just pass generic
+        print(f"DEBUG: User creation failed: {e}")
         raise HTTPException(400, f"User creation failed: {str(e)}")
 
     # 2. Key Step: Create Profile (Bypassing RLS via Service Role Key)
     try:
-        supabase.table("profiles").upsert({
-            "id": user.id,
-            "email": req.email,
-            "team_name": req.team,
-            "role": "user"
-        }).execute()
+        await asyncio.to_thread(
+            lambda: supabase.table("profiles").upsert({
+                "id": user.id,
+                "email": req.email,
+                "team_name": req.team,
+                "role": "user"
+            }).execute()
+        )
     except Exception as e:
         # In a production app, we might want to delete the user here to rollback
         print(f"Profile creation failed: {e}")
@@ -75,7 +89,7 @@ store = VectorStore()
 
 
 @traceable(name="ask_request", run_type="chain")
-def _handle_ask(query: str, request_id: str, team: str | None, user_context: dict | None = None):
+async def _handle_ask(query: str, request_id: str, team: str | None, user_context: dict | None = None):
     """One LangSmith trace per request (e.g. per refresh); all retrieve/answer spans nest under this run."""
     set_run_metadata(thread_id=request_id)
     graph = build_graph(store)
@@ -85,16 +99,16 @@ def _handle_ask(query: str, request_id: str, team: str | None, user_context: dic
         initial_state["team"] = team
     if user_context:
         initial_state["user_context"] = user_context
-    return graph.invoke(initial_state)
+    return await graph.ainvoke(initial_state)
 
 
 @app.get("/documents")
 def list_documents():
-    return store.store.all()
+    return VectorStore().store.all()
 
 
 @app.post("/ask")
-def ask(
+async def ask(
     query: str = Body(..., media_type="text/plain"),
     # Optional override to explicitly target a team (e.g. from dashboards)
     team_id: str | None = Query(default=None),
@@ -114,5 +128,17 @@ def ask(
         "role": user.role
     }
     
-    return _handle_ask(query, request_id, team, user_context)
-
+    start_time = time.time()
+    response = await _handle_ask(query, request_id, team, user_context)
+    response_time_ms = (time.time() - start_time) * 1000
+    
+    # Calculate simple accuracy metric (0.0-1.0) based on response quality
+    response_text = str(response.get("answer", "") if isinstance(response, dict) else response)
+    accuracy = min(len(response_text) / 500, 1.0) * 0.9 + 0.1  # Scale to 0.1-1.0
+    
+    try:
+        AnalyticsManager.track_query(request_id, query, team, response_time_ms, accuracy)
+    except Exception as e:
+        print(f"Analytics tracking failed: {e}")  # Don't fail the request
+    
+    return response

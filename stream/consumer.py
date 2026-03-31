@@ -18,12 +18,16 @@ for message in consumer:
     event = message.value
     print("Received:", event)
 
-    # Ensure team_tag (if present) is persisted into document metadata
     metadata = event.get("metadata", {}) or {}
     team_tag = event.get("team_tag")
     if team_tag:
         metadata.setdefault("team_tag", team_tag)
+    metadata.setdefault("issue_id", event.get("id"))
+    metadata.setdefault("issue_type", event.get("type", "unknown"))
+    metadata.setdefault("timestamp", event.get("timestamp"))
+    metadata.setdefault("created_by_user_id", metadata.get("created_by_user_id"))
+    metadata.setdefault("created_by_email", metadata.get("created_by_email"))
 
     store.add_document(text=event["text"], metadata=metadata)
 
-    print("Stored in vector DB ✅")
+    print("Stored in vector DB")

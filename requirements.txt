@@ -11,5 +11,5 @@ python-dotenv
 sqlalchemy
 passlib[bcrypt]
 python-jose[cryptography]
- multipart
- supabase-py
+python-multipart
+supabase

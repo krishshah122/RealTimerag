@@ -1,20 +1,19 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../supabaseClient";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 
 export default function Header() {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const navigate = useNavigate();
+  const location = useLocation();
 
   useEffect(() => {
-    // Fetch session and profile
     async function getUserData() {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
         setUser(session.user);
 
-        // Fetch profile for team name
         const { data } = await supabase
           .from("profiles")
           .select("team_name")
@@ -26,7 +25,6 @@ export default function Header() {
     }
     getUserData();
 
-    // Listen for auth changes to update header dynamically
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
       if (!session) setProfile(null);
@@ -40,32 +38,48 @@ export default function Header() {
     navigate("/login");
   }
 
+  const isActive = (path) => location.pathname === path;
+
   return (
     <header className="header">
-      <div className="header-title">
+      <div
+        className="header-title"
+        style={{ cursor: 'pointer' }}
+        onClick={() => navigate("/ask")}
+      >
         ⚡ Real-Time RAG
       </div>
 
       {user && (
         <div className="header-user">
           <button
+            className="nav-btn"
+            onClick={() => navigate("/ask")}
+            style={isActive("/ask") ? { background: 'rgba(99,102,241,0.15)', borderColor: 'rgba(99,102,241,0.4)', color: '#818cf8' } : {}}
+          >
+            🧠 Ask AI
+          </button>
+          <button
+            className="nav-btn"
             onClick={() => navigate("/simulation")}
-            style={{
-              background: 'none',
-              border: '1px solid #e5e7eb',
-              padding: '6px 12px',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              marginRight: '10px',
-              color: '#4b5563',
-              fontSize: '14px'
-            }}
+            style={isActive("/simulation") ? { background: 'rgba(99,102,241,0.15)', borderColor: 'rgba(99,102,241,0.4)', color: '#818cf8' } : {}}
           >
             🛠️ Simulate
           </button>
+          <button
+            className="nav-btn"
+            onClick={() => navigate("/analytics")}
+            style={isActive("/analytics") ? { background: 'rgba(99,102,241,0.15)', borderColor: 'rgba(99,102,241,0.4)', color: '#818cf8' } : {}}
+          >
+            📊 Analytics
+          </button>
           <span>
             {user.email}
-            {profile?.team_name && <strong style={{ color: '#4f46e5' }}> ({profile.team_name})</strong>}
+            {profile?.team_name && (
+              <strong style={{ color: '#818cf8', marginLeft: 4 }}>
+                ({profile.team_name})
+              </strong>
+            )}
           </span>
           <button onClick={handleLogout} className="btn-logout">
             Logout

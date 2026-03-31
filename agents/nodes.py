@@ -3,7 +3,7 @@ from retrieval.bm import SparseRetriever
 from retrieval.rrf import rrf
 from retrieval.rerank import simple_rerank
 from core.vector_store import VectorStore  # 🔥 IMPORTANT
-from groq import Groq
+from groq import AsyncGroq
 from config import LLM_MODEL
 from dotenv import load_dotenv
 import os
@@ -11,7 +11,7 @@ from langsmith import traceable
 
 load_dotenv()
 
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
 
 if not os.getenv("GROQ_API_KEY"):
     raise RuntimeError("GROQ_API_KEY not set")
@@ -111,7 +111,8 @@ def _system_prompt_for_team(team: str | None, user_context: dict | None = None) 
     return base_prompt
 
 
-def answer_node(state):
+@traceable(name="answer_node")
+async def answer_node(state):
     context = "\n".join(state["docs"])
     team = state.get("team")
     user_context = state.get("user_context")
@@ -134,7 +135,7 @@ Question:
 {state['query']}
 """
 
-    res = client.chat.completions.create(
+    res = await client.chat.completions.create(
         model=LLM_MODEL,
         messages=[{"role": "user", "content": prompt}]
     )

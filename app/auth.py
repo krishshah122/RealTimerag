@@ -1,5 +1,6 @@
 import os
 from typing import Optional
+import asyncio
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -65,6 +66,10 @@ async def _resolve_user_from_token(token: str) -> UserContext:
             jwks_url = f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json"
             
             # TODO: Add caching for JWKS!
+            # Use async client for JWKS fetching if possible, but for now wrap in thread or use sync logic
+            # Since we are inside async def, blocking here is bad.
+            # But making a new client every time is also bad.
+            # Let's keep it simple for now as most users use HS256 locally.
             with httpx.Client() as client:
                 jwks = client.get(jwks_url).json()
             
@@ -78,7 +83,7 @@ async def _resolve_user_from_token(token: str) -> UserContext:
              raise JWTError(f"Unsupported algorithm: {alg}")
 
     except Exception as e:
-        # print(f"DEBUG: JWT Decode Error: {e}")
+        print(f"DEBUG: JWT Decode Error: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Invalid authentication token: {str(e)}",
@@ -86,6 +91,7 @@ async def _resolve_user_from_token(token: str) -> UserContext:
 
     user_id = claims.get("sub")
     if not user_id:
+        print("DEBUG: No 'sub' claim in token")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token payload",
@@ -96,9 +102,18 @@ async def _resolve_user_from_token(token: str) -> UserContext:
         return UserContext(id=user_id)
 
     # Look up the profile to fetch role and team
-    resp = supabase.table("profiles").select("*").eq("id", user_id).single().execute()
+    # REVERTED: Run synchronously in main thread to see if thread pool was breaking headers/context
+    try:
+        resp = supabase.table("profiles").select("*").eq("id", user_id).single().execute()
+    except Exception as e:
+        print(f"DEBUG: Supabase lookup failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Supabase lookup error: {str(e)}",
+        )
 
     if getattr(resp, "error", None):
+        print(f"DEBUG: Supabase returned error: {resp.error}")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No profile found for user",

@@ -1,516 +1,361 @@
-# 🚀 Real-Time RAG
+# Real-Time RAG
 
-### _Ask questions over a live stream of operational issues—answers grounded in up-to-date context, no restarts._
+Real-Time RAG is a full-stack retrieval-augmented generation system for operational incidents. It ingests live issues, stores them in a local FAISS-backed knowledge base, filters context by team, and answers user questions through a secured React dashboard.
 
-**Python • FastAPI • React • LangGraph • FAISS • Kafka • Groq • LangSmith**
+This project combines real-time ingestion, team-aware retrieval, authentication, and lightweight analytics in a single repo.
 
-**Purpose-Built Hybrid Retrieval with Real-Time Ingestion and Async Indexing**
+## What This Project Does
 
-Features • Architecture • Quick Start • API • Contributing
+- Accepts incident or alert events through `POST /log_issue`
+- Publishes events to Kafka/Redpanda for asynchronous ingestion
+- Stores issue text as embeddings in FAISS with document metadata
+- Filters retrieved context by the authenticated user's team
+- Uses hybrid retrieval: dense search + BM25 + reciprocal rank fusion + reranking
+- Generates answers with Groq using a team-specific system prompt
+- Tracks issue and query analytics in local SQLite
+- Provides a React frontend for login, querying, simulation, and analytics
 
----
+## Core Features
 
-## 📖 Table of Contents
+### 1. Team-aware RAG
 
-- [Overview](#-overview)
-- [Key Features](#-key-features)
-- [Architecture](#-architecture)
-- [Tech Stack](#️-tech-stack)
-- [Quick Start](#-quick-start)
-- [Usage Guide](#-usage-guide)
-- [API Documentation](#-api-documentation)
-- [Observability (LangSmith)](#-observability-langsmith)
-- [Project Structure](#-project-structure)
-- [Pushing to GitHub](#-pushing-to-github)
-- [Contributing](#-contributing)
-- [License](#-license)
-- [Acknowledgments](#-acknowledgments)
+Each issue is tagged with a `team_tag`. During retrieval, the system filters documents so users only receive context relevant to their team or the team selected in the dashboard.
 
----
+### 2. Real-time ingestion
 
-## 🌟 Overview
+The API logs issues immediately and sends them to the `live_issues` Kafka topic. A consumer reads those events and writes them into the local vector store without requiring an API restart.
 
-**Real-Time RAG** is a full-stack retrieval-augmented generation system that keeps your knowledge base **live**. Operational issues (alerts, incidents, delays) flow in via a message stream, get indexed in a vector store without blocking the API, and users ask natural-language questions—getting answers grounded **only** in the retrieved documents.
+### 3. Hybrid retrieval pipeline
 
-### 🎯 The Problem
+The answer pipeline combines:
 
-Operations and support teams face three critical challenges:
+- Dense semantic retrieval from FAISS
+- Sparse lexical retrieval with BM25
+- Reciprocal Rank Fusion (RRF)
+- Lightweight overlap-based reranking
 
-- 📚 **Information overload** — Alerts, logs, and tickets pour in from many sources; finding "what's going on" means scanning dashboards and tools.
-- 🔄 **Stale RAG** — Classic RAG assumes a static corpus; new issues require re-indexing or server restarts to show up in answers.
-- ⏱️ **Slow ingest under load** — If every logged issue triggers embedding + indexing in the API, latency spikes and throughput drops when volume grows.
+This improves both semantic matching and exact keyword matching for operational queries.
 
-### 💡 Our Solution
+### 4. Authenticated access
 
-Real-Time RAG provides:
+Supabase is used for:
 
-- **📥 Async ingestion** — API publishes to Kafka and returns immediately; a background consumer does embedding and indexing so the system stays fast and scalable.
-- **🔍 Hybrid retrieval** — Dense (FAISS) + sparse (BM25) with RRF fusion and rerank so answers use the best mix of semantic and keyword match.
-- **📡 Always-fresh context** — Retrieve step loads the latest index from disk on every query, so new issues appear in answers without restarting anything.
-- **🎯 Grounded answers** — The LLM is prompted to use **only** the provided context, so responses are traceable and factual.
+- signup and login
+- JWT-based authentication
+- profile lookup
+- team and role resolution
 
----
+Protected routes are enforced in the frontend and protected endpoints are enforced in FastAPI dependencies.
 
-## ✨ Key Features
+### 5. Analytics dashboard
 
-**📥 Real-Time Ingestion**
+The app stores:
 
-- **Kafka-backed** event stream (`live_issues` topic)
-- **Fast API** — `POST /log_issue` only publishes and returns; no blocking on embedding or indexing
-- **Durable queue** — Messages buffered if the consumer is down; process when ready
-- **Scalable** — Multiple producers can log issues; one or more consumers handle indexing
+- query count
+- issue count
+- average response time
+- average answer quality proxy
+- top questions
+- issue trends over time
 
-**🔍 Hybrid Retrieval Pipeline**
+Analytics are persisted in `rag_analytics.db` using SQLite and SQLAlchemy.
 
-| Step | Component | Purpose |
-|------|------------|---------|
-| 1 | **Dense (FAISS)** | Semantic search with query embedding → top 5 |
-| 2 | **Sparse (BM25)** | Keyword search over document texts → top 5 |
-| 3 | **RRF** | Reciprocal Rank Fusion to merge both rankings fairly |
-| 4 | **Rerank** | Query-term overlap to boost docs that contain query words |
-| 5 | **Top 3** | Final context passed to the LLM for generation |
+## Architecture
 
-**🧠 LangGraph Orchestration**
+```text
+Simulation / Client
+        |
+        v
+  FastAPI /log_issue
+        |
+        v
+ Kafka / Redpanda topic: live_issues
+        |
+        v
+   stream/consumer.py
+        |
+        v
+ Embeddings -> FAISS + docs.json
 
-- **Two-node graph**: `retrieve` → `answer`
-- **Retrieve node** — Loads latest VectorStore from disk, runs dense + BM25 + RRF + rerank, returns top 3 doc strings
-- **Answer node** — Builds context from docs, calls Groq LLM with an operations-analyst prompt, returns the answer
-
-**🖥️ Simple React UI**
-
-- **Ask panel** — Type a question, get an answer grounded in live issues
-- **Plain-text API** — `POST /ask` with body as raw query string
-- **CORS** — Frontend (Vite dev server) talks to FastAPI on port 8000
-
-**📊 Observability (LangSmith)**
-
-- **Tracing** — Retrieval and answer steps are traced with `@traceable` so you can inspect latency and inputs/outputs in [LangSmith](https://smith.langchain.com/).
-- **Instrumented components** — Embeddings, dense/sparse retrieval, RRF, rerank, vector store, and the retrieve/answer nodes are all traced.
-- **Optional** — Set `LANGSMITH_TRACING=true` and `LANGCHAIN_API_KEY` (or LangSmith API key) in `.env` to enable; leave unset to run without tracing.
-
----
-<p float="left">
-  <img src="C:\Users\kriss\OneDrive\Desktop\realtimerag\rag\assets\Screenshot 2026-02-07 115009.png" width="45%" />
-  <img src="rag/assets/Screenshot 2026-02-07 115020.png" width="45%" />
-</p>
-
-*Backend FastAPI API (left) | Frontend React UI (right)*
-
-
-## 🏗️ Architecture
-
-### System Overview
-
-```
-                    INGESTION (async)                    QUERY (sync)
-┌─────────────────────────────────────────┐   ┌─────────────────────────────────────────┐
-│  Client  →  POST /log_issue  →  FastAPI │   │  User  →  React  →  POST /ask           │
-│       →  Kafka (live_issues)            │   │       →  LangGraph [retrieve → answer]   │
-│                                         │   │       →  Groq  →  answer                 │
-│  Consumer  ←  Kafka  ←  embed + FAISS   │   │  retrieve: dense + BM25 + RRF + rerank    │
-│       →  persist to disk                │   │  answer: context + LLM                   │
-└─────────────────────────────────────────┘   └─────────────────────────────────────────┘
+Authenticated User
+        |
+        v
+ React frontend -> FastAPI /ask
+        |
+        v
+ Auth middleware resolves user/team
+        |
+        v
+ LangGraph:
+   retrieve -> answer
+        |
+        v
+ Groq LLM response
 ```
 
-### Retrieval Pipeline
+## Retrieval Flow
 
 ```mermaid
 graph LR
-    A[Query] --> B[Dense FAISS]
-    A --> C[BM25 Sparse]
-    B --> D[RRF Fusion]
-    C --> D
-    D --> E[Rerank]
-    E --> F[Top 3 Docs]
-    F --> G[Answer Node]
-    G --> H[Groq LLM]
-    H --> I[Response]
+    A["User query"] --> B["Resolve team context"]
+    B --> C["Dense retrieval from FAISS"]
+    B --> D["Sparse retrieval with BM25"]
+    C --> E["Filter docs by team_tag"]
+    D --> F["Build lexical matches on team-scoped corpus"]
+    E --> G["RRF fusion"]
+    F --> G
+    G --> H["Simple rerank"]
+    H --> I["Top documents"]
+    I --> J["Groq answer generation"]
 ```
 
-*(If your GitHub doesn't render Mermaid, the flow is: Query → Dense + BM25 → RRF → Rerank → Top 3 → Answer node → Groq → Response.)*
+## Tech Stack
 
-### Agent Pipeline (LangGraph)
+### Backend
 
-| Node | Input | Output |
-|------|--------|--------|
-| **retrieve** | `query` | `docs` (top 3 text strings) |
-| **answer** | `query`, `docs` | `answer` (LLM response) |
-
----
-
-## 🛠️ Tech Stack
+- FastAPI for API endpoints and dependency-based auth
+- LangGraph for orchestrating retrieve and answer stages
+- Groq for low-latency LLM inference
+- SentenceTransformers with `all-MiniLM-L6-v2` for embeddings
+- FAISS for vector similarity search
+- rank-bm25 for lexical retrieval
+- SQLAlchemy + SQLite for analytics
+- python-jose for JWT verification
+- Supabase Python client for auth and profile access
 
 ### Frontend
 
-**React** • **Vite** • JavaScript (ES modules)
+- React 19
+- Vite
+- React Router
+- Supabase JS client
 
-### Backend & AI
+### Streaming / Infra
 
-- **FastAPI** — REST API, CORS, `/ask`, `/log_issue`, `/documents`
-- **LangGraph** — Retrieve → Answer graph with shared state
-- **Sentence Transformers** — `all-MiniLM-L6-v2` (384-d) for embeddings
-- **FAISS** — Vector index (in-memory, persisted to disk)
-- **rank_bm25** — BM25 sparse retrieval
-- **Groq** — LLM inference (`llama-3.1-8b-instant`)
+- Kafka client library
+- Redpanda via Docker Compose
 
-### Data & Stream
+## Project Structure
 
-- **Apache Kafka** (Redpanda) — Topic `live_issues`; producer in API, consumer for indexing
-- **Persistence** — `data/faiss.index`, `data/docs.json`, `data/version.txt`
-
-### Observability
-
-- **[LangSmith](https://smith.langchain.com/)** — Tracing for retrieval and generation; `@traceable` on embeddings, dense/sparse retrieval, RRF, rerank, vector store, and graph nodes.
-
-### Libraries & Tools
-
-- **Uvicorn** — ASGI server
-- **python-dotenv** — Environment variables (e.g. `GROQ_API_KEY`, LangSmith)
-- **kafka-python** — Producer and consumer clients
-
----
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- **Python** >= 3.10
-- **Node.js** (for frontend)
-- **Docker** (for Redpanda / Kafka)
-- **Groq API key** — [Groq](https://groq.com/)
-- **LangSmith API key** (optional) — [LangSmith](https://smith.langchain.com/) for tracing and observability
-
-### Installation
-
-1️⃣ **Clone the repository**
-
-```bash
-git clone https://github.com/yourusername/realtimerag.git
-cd realtimerag/rag
+```text
+rag/
++-- agents/
+�   +-- graph.py           # LangGraph definition
+�   +-- nodes.py           # retrieve_node and answer_node
+�   +-- state.py           # RAG state shape
++-- app/
+�   +-- analytics.py       # Analytics API routes
+�   +-- auth.py            # Supabase JWT + user resolution
+�   +-- issues.py          # Issue ingestion route
+�   +-- main.py            # FastAPI entrypoint
++-- core/
+�   +-- analytics.py       # SQLite analytics logic
+�   +-- document_store.py  # In-memory doc map
+�   +-- embeddings.py      # Embedding model loader
+�   +-- persistence.py     # Save/load FAISS and docs
+�   +-- vector_store.py    # Search + add document logic
++-- retrieval/
+�   +-- bm.py              # BM25 sparse retrieval
+�   +-- dense.py           # Dense retrieval wrapper
+�   +-- rerank.py          # Overlap-based reranking
+�   +-- rrf.py             # Reciprocal Rank Fusion
++-- stream/
+�   +-- consumer.py        # Kafka consumer and index updater
+�   +-- producer.py        # Kafka producer
++-- frontend/
+�   +-- src/
+�       +-- components/    # Login, signup, simulation, dashboards
+�       +-- api.js         # Frontend API helpers
+�       +-- App.jsx        # Routes
++-- data/                  # FAISS index, docs.json, version.txt
++-- config.py
++-- docker-compose.yaml
++-- requirements.txt
++-- rag_analytics.db
 ```
 
-2️⃣ **Create a virtual environment and install Python dependencies**
+## API Summary
 
-```bash
-python -m venv venv
-source venv/bin/activate   # Windows: venv\Scripts\activate
-pip install fastapi uvicorn langgraph faiss-cpu sentence-transformers groq kafka-python rank-bm25 python-dotenv langsmith
+### `POST /register`
+
+Creates a Supabase auth user and inserts a profile record with team information.
+
+Request:
+
+```json
+{
+  "email": "user@example.com",
+  "password": "strong-password",
+  "team": "devops"
+}
 ```
 
-3️⃣ **Set up environment variables**
+### `POST /ask`
+
+Authenticated endpoint for RAG queries.
+
+- Body is plain text, not JSON
+- Optional query param: `team_id`
+
+Example:
+
+```http
+POST /ask?team_id=security
+Authorization: Bearer <jwt>
+Content-Type: text/plain
+
+What are the most critical security incidents right now?
+```
+
+### `POST /log_issue`
+
+Authenticated endpoint that logs a new incident and tags it with the current user's team.
+
+Request:
+
+```json
+{
+  "type": "alert",
+  "text": "Database CPU usage is above 95% for five minutes",
+  "metadata": {
+    "severity": "critical",
+    "source": "PagerDuty"
+  }
+}
+```
+
+### Analytics endpoints
+
+- `GET /analytics/queries`
+- `GET /analytics/issues`
+- `GET /analytics/timeline`
+- `GET /analytics/dashboard`
+- `POST /admin/reset`
+
+All of these require authentication.
+
+## Frontend Pages
+
+- `/login` for sign-in
+- `/signup` for account creation
+- `/ask` for direct question answering
+- `/backend` for team-specific chat tabs
+- `/simulation` for triggering sample incidents
+- `/analytics` for metrics and reset actions
+
+## Environment Variables
+
+### Backend `.env`
 
 Create `rag/.env`:
 
 ```env
-GROQ_API_KEY=your_groq_api_key_here
+GROQ_API_KEY=your_groq_api_key
+SUPABASE_URL=your_supabase_url
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+SUPABASE_JWT_SECRET=your_supabase_jwt_secret
 
-# Optional: LangSmith tracing (get API key at https://smith.langchain.com/)
-LANGSMITH_TRACING=true
-LANGCHAIN_API_KEY=your_langsmith_api_key_here
-LANGCHAIN_PROJECT=My-RealTime-RAG
+# Optional LangSmith tracing
+LANGCHAIN_TRACING_V2=true
+LANGSMITH_PROJECT=realtime-rag
+LANGCHAIN_API_KEY=your_langsmith_api_key
 ```
 
-4️⃣ **Start Kafka (Redpanda)**
+### Frontend `frontend/.env`
 
-```bash
-docker compose -f rag/docker-compose.yaml up -d
+```env
+VITE_SUPABASE_URL=your_supabase_url
+VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
 ```
 
-5️⃣ **Start the backend**
+## How To Run
+
+### 1. Backend dependencies
 
 ```bash
 cd rag
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
 ```
 
-6️⃣ **Start the Kafka consumer** (in a second terminal)
+### 2. Frontend dependencies
+
+```bash
+cd rag/frontend
+npm install
+```
+
+### 3. Start Redpanda
+
+```bash
+cd rag
+docker compose up -d
+```
+
+### 4. Start the FastAPI server
+
+```bash
+cd rag
+uvicorn app.main:app --reload --port 8000
+```
+
+### 5. Start the Kafka consumer
 
 ```bash
 cd rag
 python -m stream.consumer
 ```
 
-7️⃣ **Start the frontend** (in a third terminal)
+### 6. Start the frontend
 
 ```bash
 cd rag/frontend
-npm install
 npm run dev
 ```
 
-8️⃣ **Open your browser**
+Open `http://localhost:5173`.
 
-```
-http://localhost:5173
-```
+## Typical User Flow
 
-### Production Build
+1. A user signs up and is mapped to a team such as `ops`, `devops`, or `security`.
+2. The user logs in through Supabase.
+3. The user triggers incidents from the simulation page or submits custom issues.
+4. The backend sends those events to Kafka and records analytics.
+5. The consumer reads the events and updates the vector index on disk.
+6. The user asks a question from `/ask` or `/backend`.
+7. The backend resolves team context, retrieves matching documents, and generates a grounded answer.
+8. Query metrics are stored and shown in the analytics dashboard.
 
-**Backend:** run with a process manager (e.g. Gunicorn + Uvicorn workers).  
-**Frontend:** `cd rag/frontend && npm run build` then serve the `dist/` folder.
+## Why This Project Is Interesting
 
----
+- It solves the stale-knowledge problem in traditional RAG systems.
+- It demonstrates multi-tenant or team-scoped retrieval.
+- It combines streaming, vector search, lexical retrieval, and LLM reasoning.
+- It includes a complete product loop: auth, ingestion, retrieval, analytics, and UI.
+- It is practical to demo because the simulation page generates realistic incidents quickly.
 
-## 📚 Usage Guide
+## Current Implementation Notes
 
-### 1. Log an issue (ingest)
+- The vector store is persisted locally in `data/faiss.index` and `data/docs.json`.
+- `VectorStore` reloads from disk when the data version changes, which allows fresh queries without restarting the API.
+- Team filtering happens in `agents/nodes.py` using `metadata.team_tag`.
+- Analytics are stored locally in SQLite for simplicity and easy demo setup.
+- Redpanda is used as a lightweight Kafka-compatible local broker.
 
-Send a `POST` request to `/log_issue` (e.g. from a script, monitoring tool, or API client):
+## Future Improvements
 
-```json
-{
-  "type": "outage",
-  "text": "Database replica lag exceeding 5 seconds in region us-east-1",
-  "metadata": { "source": "cloudwatch" }
-}
-```
+- Add stronger authorization so the dashboard cannot manually switch to unauthorized teams
+- Add better reranking with a learned reranker or cross-encoder
+- Add automated tests for the retrieval and auth flows
+- Add proper admin-only protection for destructive endpoints like `/admin/reset`
+- Move analytics and document metadata to managed storage for production readiness
+- Add background workers, retry logic, and dead-letter handling for ingestion failures
 
-The API publishes to Kafka and returns immediately. The **consumer** (step 6 above) will embed and index the text so it appears in future answers.
+## Interview Preparation
 
-### 2. Ask a question
+See `INTERVIEW.md` for detailed interview questions, answers, architecture explanations, and technology-choice reasoning for this project.
 
-In the React UI:
+## License
 
-- Type your question in the text area (e.g. *"What database issues have been reported?"*).
-- Click **Ask**.
-- The app calls `POST /ask` with your question as plain text; the backend runs **retrieve** (dense + BM25 + RRF + rerank) then **answer** (Groq), and displays the result.
-
-### 3. List indexed documents (optional)
-
-- **GET** `/documents` returns all documents currently in the store (useful for debugging or inspection).
-
-### 4. Run all three processes
-
-For a full experience:
-
-- **Terminal 1:** `uvicorn app.main:app --reload --port 8000`
-- **Terminal 2:** `python -m stream.consumer`
-- **Terminal 3:** `cd rag/frontend && npm run dev`
-
-Then log an issue (e.g. with `curl` or Postman) and ask a question in the browser—the new issue should be included in the context for the answer.
-
----
-
-## 🔌 API Documentation
-
-### Ask a question
-
-**POST** `/ask`  
-**Content-Type:** `text/plain`  
-**Body:** Raw string (the question).
-
-**Example:**
-
-```bash
-curl -X POST http://127.0.0.1:8000/ask \
-  -H "Content-Type: text/plain" \
-  -d "What delays or outages were reported today?"
-```
-
-**Response:** JSON with the LLM answer.
-
-```json
-{
-  "answer": "Based on the context, ..."
-}
-```
-
-*(Exact key may be `answer` or nested under graph output; frontend handles both.)*
-
----
-
-### Log an issue
-
-**POST** `/log_issue`  
-**Content-Type:** `application/json`  
-**Body:**
-
-```json
-{
-  "type": "outage",
-  "text": "Description of the issue or alert.",
-  "metadata": {}
-}
-```
-
-**Response:**
-
-```json
-{
-  "status": "logged",
-  "event": {
-    "type": "outage",
-    "text": "Description of the issue or alert.",
-    "metadata": {},
-    "timestamp": "2026-02-07T12:00:00.000000"
-  }
-}
-```
-
----
-
-### List documents
-
-**GET** `/documents`  
-**Response:** JSON array of all documents in the current store (for debugging).
-
----
-
-## 📊 Observability (LangSmith)
-
-The app is instrumented with **[LangSmith](https://smith.langchain.com/)** so you can trace each `/ask` request and see latency, inputs, and outputs for retrieval and generation.
-
-### What gets traced
-
-| Component | Decorator | What you see in LangSmith |
-|-----------|-----------|---------------------------|
-| **retrieve_node** | `@traceable(name="retrieve_node")` | Query, loaded store, and top 3 docs |
-| **answer_node** | `@traceable` | Context, prompt, and LLM response |
-| **Embeddings** | `@traceable(name="embeddingsload")` | Model load and encode calls |
-| **DenseRetriever** | `@traceable` | FAISS search inputs/outputs |
-| **SparseRetriever (BM25)** | `@traceable` | BM25 search |
-| **RRF / rerank** | `@traceable` | Fusion and rerank steps |
-| **VectorStore** | `@traceable` | Load from disk and search |
-
-### Enable tracing
-
-1. Get an API key at [smith.langchain.com](https://smith.langchain.com/).
-2. In `rag/.env` add:
-   ```env
-   LANGSMITH_TRACING=true
-   LANGCHAIN_API_KEY=your_langsmith_api_key
-   LANGCHAIN_PROJECT=My-RealTime-RAG
-   ```
-3. Restart the backend. On startup you should see e.g. `LangSmith enabled: true` and `Project: My-RealTime-RAG`.
-4. Run a few `/ask` requests; traces appear under your project in the LangSmith dashboard.
-
-### Disable tracing
-
-Leave `LANGSMITH_TRACING` unset or set it to `false`. The app runs normally without sending any data to LangSmith.
-
----
-
-## 📁 Project Structure
-
-```
-realtimerag/
-├── rag/
-│   ├── app/
-│   │   ├── main.py              # FastAPI app, /documents, /ask, CORS
-│   │   └── issues.py            # POST /log_issue → Kafka producer
-│   ├── agents/
-│   │   ├── graph.py             # LangGraph: retrieve → answer
-│   │   ├── nodes.py             # retrieve_node, answer_node
-│   │   └── state.py             # RAGState (query, docs, answer)
-│   ├── core/
-│   │   ├── embeddings.py        # SentenceTransformer (all-MiniLM-L6-v2)
-│   │   ├── vector_store.py      # FAISS + DocumentStore, load/save
-│   │   ├── document_store.py
-│   │   └── persistence.py       # save/load index + docs + version
-│   ├── retrieval/
-│   │   ├── dense.py             # DenseRetriever (FAISS)
-│   │   ├── bm.py                # SparseRetriever (BM25)
-│   │   ├── rrf.py               # RRF fusion
-│   │   └── rerank.py            # simple_rerank (query-word overlap)
-│   ├── stream/
-│   │   ├── producer.py          # Kafka producer, send_issue_event()
-│   │   └── consumer.py          # Kafka consumer → add_document()
-│   ├── data/                    # faiss.index, docs.json, version.txt
-│   ├── config.py                # EMBEDDING_MODEL, LLM_MODEL, TOP_K
-│   ├── requirements.txt
-│   ├── docker-compose.yaml      # Redpanda on 9092
-│   └── frontend/                # React + Vite
-│       ├── src/
-│       │   ├── App.jsx
-│       │   ├── api.js           # askQuestion() → POST /ask
-│       │   └── components/       # Header, AskPanel
-│       └── package.json
-└── README.md                    # This file
-```
-
----
-
-## 📤 Pushing to GitHub
-
-Follow these steps to put the project on GitHub (first time).
-
-1. **Initialize git** (from project root `realtimerag/`):
-
-   ```bash
-   cd c:\Users\kriss\OneDrive\Desktop\realtimerag
-   git init
-   ```
-
-2. **Stage and commit**:
-
-   ```bash
-   git add .
-   git status   # check that .env and meenv/ are not listed
-   git commit -m "Initial commit: Real-Time RAG with FastAPI, LangGraph, Kafka, React"
-   ```
-
-3. **Create a new repo on GitHub** — Go to [github.com/new](https://github.com/new), name it e.g. `realtimerag`, leave it empty (no README/license).
-
-4. **Add remote and push** (replace `YOUR_USERNAME` and `realtimerag` with your repo):
-
-   ```bash
-   git remote add origin https://github.com/YOUR_USERNAME/realtimerag.git
-   git branch -M main
-   git push -u origin main
-   ```
-
-If you use SSH: `git remote add origin git@github.com:YOUR_USERNAME/realtimerag.git`
-
----
-
-## 🤝 Contributing
-
-We welcome contributions. Suggested steps:
-
-1. **Fork** the repository.
-2. **Create** a feature branch (`git checkout -b feature/your-feature`).
-3. **Commit** your changes (`git commit -m 'Add your feature'`).
-4. **Push** to the branch (`git push origin feature/your-feature`).
-5. **Open** a Pull Request.
-
-- Keep `.env` and secrets out of commits.
-- Add or update tests and docs as needed for new behavior.
-
----
-
-## 🐛 Bug Reports & Feature Requests
-
-Open an issue with:
-
-- A **clear title** and description
-- **Steps to reproduce** (for bugs)
-- **Expected vs actual behavior**
-- **Environment** (OS, Python/Node versions)
-
----
-
-## 📄 License
-
-This project is licensed under the **MIT License** — use and adapt as needed. See the LICENSE file for details.
-
----
-
-## 🙏 Acknowledgments
-
-- **[FastAPI](https://fastapi.tiangolo.com/)** for the modern Python API framework
-- **[LangChain / LangGraph](https://langchain-ai.github.io/langgraph/)** for the retrieve–answer orchestration
-- **[LangSmith](https://smith.langchain.com/)** for tracing and observability
-- **[FAISS](https://github.com/facebookresearch/faiss)** for efficient vector search
-- **[Groq](https://groq.com/)** for fast LLM inference
-- **[Redpanda](https://redpanda.com/)** for Kafka-compatible streaming
-- **Open source community** for the libraries that power this stack
-
----
-
-### ⭐ Star us on GitHub — it helps others find Real-Time RAG!
-
-**Made with ❤️ for ops and support teams who need answers from live data.**
-
----
-
-**Real-Time RAG** © 2026 • Ask questions over a live stream of issues—grounded, up-to-date answers.
+MIT. See `LICENSE`.

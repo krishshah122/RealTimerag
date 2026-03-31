@@ -47,6 +47,39 @@ class VectorStore:
         self.version = current_version()
         return doc_id
 
+    def delete_documents(self, *, issue_id=None, text=None, team_tag=None):
+        """
+        Delete documents from the vector store.
+
+        Prefer matching by `metadata.issue_id`. For older entries that do not
+        persist the issue id in metadata, fall back to matching by `text` and
+        optional `team_tag`.
+        """
+        self._reload_if_needed()
+
+        ids_to_delete = []
+        for doc_id, doc in self.store.docs.items():
+            metadata = doc.get("metadata", {}) or {}
+            issue_match = issue_id and metadata.get("issue_id") == issue_id
+            fallback_match = (
+                text is not None
+                and doc.get("text") == text
+                and (team_tag is None or metadata.get("team_tag") == team_tag)
+            )
+            if issue_match or fallback_match:
+                ids_to_delete.append(int(doc_id))
+
+        if not ids_to_delete:
+            return 0
+
+        self.index.remove_ids(np.array(ids_to_delete, dtype="int64"))
+        for doc_id in ids_to_delete:
+            self.store.docs.pop(doc_id, None)
+
+        save(self.index, self.store.docs)
+        self.version = current_version()
+        return len(ids_to_delete)
+
     def search(self, query, k=4):
         # 🔥 Always ensure fresh data
         self._reload_if_needed()
