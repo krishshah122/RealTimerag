@@ -20,7 +20,7 @@ INDEXED_PAYLOAD_FIELDS = ("team_tag", "issue_id", "status", "severity", "service
 
 class QdrantBackend:
     def __init__(self):
-        self.client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
+        self.client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT, check_compatibility=False)
         self.collection = QDRANT_COLLECTION
         self._ensure_collection()
         self._doc_counter = self._max_id() + 1

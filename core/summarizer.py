@@ -17,10 +17,12 @@ async def summarize_incident(text: str, metadata: dict | None = None) -> dict:
     context = f"Severity: {meta.get('severity', 'unknown')}\nService: {meta.get('service', 'unknown')}\nTeam: {meta.get('team_tag', 'unknown')}\n\nIncident:\n{text}"
 
     prompt = f"""Analyze this operational incident and respond in JSON format with exactly these keys:
-- summary: 1-2 sentence overview
-- root_cause: likely root cause (or "Under investigation" if unclear)
-- impact: business/technical impact
-- recommendation: suggested remediation steps
+- summary: 1-2 sentence objective factual overview based strictly on the provided text
+- root_cause: extract root cause ONLY if explicitly documented in the text, otherwise write "Pending investigation"
+- impact: extract impact ONLY if explicitly stated in the text, otherwise write "Pending assessment"
+- recommendation: write exactly "Reference historical RAG incidents for verified remediation solutions."
+
+CRITICAL RULE: Do NOT make external assumptions, guess root causes, or invent recommendations that are not explicitly present in the incident text.
 
 {context}
 
@@ -29,7 +31,7 @@ Respond ONLY with valid JSON, no markdown."""
     res = await client.chat.completions.create(
         model=LLM_MODEL,
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.2,
+        temperature=0.0,  # Zero temperature for maximum factual consistency
     )
     content = res.choices[0].message.content or "{}"
 
@@ -39,13 +41,16 @@ Respond ONLY with valid JSON, no markdown."""
         content = content.strip()
         if content.startswith("```"):
             content = content.split("\n", 1)[-1].rsplit("```", 1)[0]
-        return json.loads(content)
-    except json.JSONDecodeError:
+        data = json.loads(content)
+        # Ensure zero assumptions on recommendations during initial triage
+        data["recommendation"] = "Reference historical RAG incidents for verified remediation solutions."
+        return data
+    except (json.JSONDecodeError, KeyError, TypeError):
         return {
             "summary": content[:300],
-            "root_cause": "Under investigation",
-            "impact": "Impact assessment pending",
-            "recommendation": "Review incident details and escalate if critical",
+            "root_cause": "Pending investigation",
+            "impact": "Pending assessment",
+            "recommendation": "Reference historical RAG incidents for verified remediation solutions.",
         }
 
 

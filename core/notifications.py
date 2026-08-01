@@ -97,8 +97,8 @@ def notify_incident_created(
     title = f"[{severity.upper()}] {incident.get('service', 'Incident')}"
     message = incident.get("text", "")
     recommendation = incident.get("recommendation")
-    if recommendation:
-        message += f"\n\nRecommended Action:\n{recommendation}"
+    if recommendation and "Reference historical RAG incidents" not in recommendation and "Review incident details" not in recommendation:
+        message += f"\n\nVerified Recommended Action:\n{recommendation}"
 
     if "web" in channels and user_id:
         _store_web_notification(user_id, title, message, incident.get("incident_id"))

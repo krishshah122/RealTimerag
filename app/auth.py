@@ -23,6 +23,12 @@ else:
 
 security = HTTPBearer(auto_error=False)
 
+import time
+# In-memory TTL caches to eliminate repetitive network requests during UI polling
+_JWKS_CACHE: dict = {"data": None, "expires_at": 0}
+_PROFILE_CACHE: dict = {}
+CACHE_TTL_SECONDS = 600  # 10 minutes cache duration
+
 
 class UserContext(BaseModel):
     id: str
@@ -60,22 +66,18 @@ async def _resolve_user_from_token(token: str) -> UserContext:
                 options={"verify_aud": False},
             )
         elif alg == "ES256" or alg == "RS256":
-            # Verify using JWKS (Public Key)
-            import httpx
-            # Correct path for Supabase Auth v1 JWKS
-            jwks_url = f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json"
-            
-            # TODO: Add caching for JWKS!
-            # Use async client for JWKS fetching if possible, but for now wrap in thread or use sync logic
-            # Since we are inside async def, blocking here is bad.
-            # But making a new client every time is also bad.
-            # Let's keep it simple for now as most users use HS256 locally.
-            with httpx.Client() as client:
-                jwks = client.get(jwks_url).json()
+            # Verify using JWKS (Public Key) with in-memory TTL caching
+            now = time.time()
+            if not _JWKS_CACHE["data"] or now > _JWKS_CACHE["expires_at"]:
+                import httpx
+                jwks_url = f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json"
+                with httpx.Client() as client:
+                    _JWKS_CACHE["data"] = client.get(jwks_url).json()
+                _JWKS_CACHE["expires_at"] = now + CACHE_TTL_SECONDS
             
             claims = jwt.decode(
                 token,
-                jwks, # python-jose can handle the JWKS dict directly
+                _JWKS_CACHE["data"],
                 algorithms=[alg],
                 options={"verify_aud": False},
             )
@@ -101,8 +103,18 @@ async def _resolve_user_from_token(token: str) -> UserContext:
         # Allow running without Supabase backing store, but we still have an id from JWT.
         return UserContext(id=user_id)
 
-    # Look up the profile to fetch role and team
-    # REVERTED: Run synchronously in main thread to see if thread pool was breaking headers/context
+    # Check in-memory profile cache before querying Supabase database
+    now = time.time()
+    if user_id in _PROFILE_CACHE:
+        cached_time, cached_profile = _PROFILE_CACHE[user_id]
+        if now < cached_time + CACHE_TTL_SECONDS:
+            return UserContext(
+                id=user_id,
+                email=cached_profile.get("email"),
+                role=cached_profile.get("role"),
+                team=cached_profile.get("team_name"),
+            )
+
     try:
         resp = supabase.table("profiles").select("*").eq("id", user_id).single().execute()
     except Exception as e:
@@ -120,6 +132,7 @@ async def _resolve_user_from_token(token: str) -> UserContext:
         )
 
     profile = resp.data or {}
+    _PROFILE_CACHE[user_id] = (now, profile)
 
     return UserContext(
         id=user_id,

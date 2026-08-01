@@ -34,7 +34,7 @@ async def lifespan(app: FastAPI):
     if VECTOR_BACKEND == "qdrant":
         try:
             from qdrant_client import QdrantClient
-            client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
+            client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT, check_compatibility=False)
             client.get_collections()
             print(f"Qdrant connected at {QDRANT_HOST}:{QDRANT_PORT}")
         except Exception as e:
