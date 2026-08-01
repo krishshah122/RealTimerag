@@ -1,13 +1,14 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "../supabaseClient";
+import { generateAlerts } from "../api";
 
 export default function Simulation() {
     const [logs, setLogs] = useState([]);
     const [loading, setLoading] = useState(false);
     const [team, setTeam] = useState("Loading...");
+    const [bulkCount, setBulkCount] = useState(10);
 
-    // Fetch team on mount
-    useState(() => {
+    useEffect(() => {
         supabase.auth.getSession().then(({ data: { session } }) => {
             if (session?.user) {
                 supabase
@@ -126,6 +127,26 @@ export default function Simulation() {
         }
     }
 
+    async function triggerBulkGeneration() {
+        setLoading(true);
+        try {
+            const result = await generateAlerts(bulkCount);
+            setLogs(prev => [{
+                time: new Date().toLocaleTimeString(),
+                message: `Generated ${result.generated} simulated alerts`,
+                details: `Ingested via Alert Generator for team ${team}`,
+            }, ...prev]);
+        } catch (err) {
+            setLogs(prev => [{
+                time: new Date().toLocaleTimeString(),
+                message: `Error: ${err.message}`,
+                isError: true,
+            }, ...prev]);
+        } finally {
+            setLoading(false);
+        }
+    }
+
     return (
         <div className="ask-page" style={{ alignItems: 'stretch', maxWidth: 960, margin: '0 auto' }}>
             {/* Hero */}
@@ -150,6 +171,40 @@ export default function Simulation() {
                     <strong style={{ color: 'var(--text-accent)' }}>Current Context:</strong> Simulating events for Team{' '}
                     <strong style={{ color: 'var(--text-primary)', textTransform: 'uppercase' }}>{team}</strong>
                 </span>
+            </div>
+
+            {/* Alert Generator */}
+            <div className="glass-card" style={{ marginBottom: 28, padding: '20px 24px' }}>
+                <div className="section-title blue" style={{ fontSize: 18 }}>
+                    <span className="icon">⚡</span>
+                    Automated Alert Generator
+                </div>
+                <p style={{ color: 'var(--text-secondary)', marginBottom: 16, fontSize: 14 }}>
+                    Generate realistic monitoring alerts (CPU spikes, connection exhaustion, latency, etc.)
+                    and stream them through Kafka into the vector index.
+                </p>
+                <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                    <input
+                        type="number"
+                        min={1}
+                        max={100}
+                        value={bulkCount}
+                        onChange={(e) => setBulkCount(Number(e.target.value))}
+                        style={{ width: 80, padding: 10, borderRadius: 8, border: '1px solid var(--border-color)' }}
+                    />
+                    <button
+                        onClick={triggerBulkGeneration}
+                        disabled={loading}
+                        style={{
+                            padding: '12px 24px',
+                            background: 'var(--gradient-primary)',
+                            color: 'white', border: 'none', borderRadius: 8,
+                            fontWeight: 700, cursor: loading ? 'not-allowed' : 'pointer',
+                        }}
+                    >
+                        {loading ? 'Generating...' : `Generate ${bulkCount} Alerts`}
+                    </button>
+                </div>
             </div>
 
             {/* Scenario Buttons */}

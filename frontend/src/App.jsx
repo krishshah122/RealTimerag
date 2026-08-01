@@ -7,6 +7,7 @@ import ProtectedRoute from "./components/ProtectedRoute";
 import Signup from "./components/Signup";
 import Simulation from "./components/Simulation";
 import { AnalyticsPage } from "./AnalyticsPage";
+import IncidentsPage from "./IncidentsPage";
 import "./styles.css";
 
 function App() {
@@ -55,6 +56,16 @@ function App() {
             element={
               <ProtectedRoute>
                 <AnalyticsPage />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Incidents lifecycle route */}
+          <Route
+            path="/incidents"
+            element={
+              <ProtectedRoute>
+                <IncidentsPage />
               </ProtectedRoute>
             }
           />

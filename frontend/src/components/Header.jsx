@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../supabaseClient";
 import { useNavigate, useLocation } from "react-router-dom";
+import NotificationsBell from "../NotificationsBell";
 
 export default function Header() {
   const [user, setUser] = useState(null);
@@ -47,7 +48,7 @@ export default function Header() {
         style={{ cursor: 'pointer' }}
         onClick={() => navigate("/ask")}
       >
-        ⚡ Real-Time RAG
+        ⚡ Incident Intelligence
       </div>
 
       {user && (
@@ -68,11 +69,19 @@ export default function Header() {
           </button>
           <button
             className="nav-btn"
+            onClick={() => navigate("/incidents")}
+            style={isActive("/incidents") ? { background: 'rgba(99,102,241,0.15)', borderColor: 'rgba(99,102,241,0.4)', color: '#818cf8' } : {}}
+          >
+            🚨 Incidents
+          </button>
+          <button
+            className="nav-btn"
             onClick={() => navigate("/analytics")}
             style={isActive("/analytics") ? { background: 'rgba(99,102,241,0.15)', borderColor: 'rgba(99,102,241,0.4)', color: '#818cf8' } : {}}
           >
             📊 Analytics
           </button>
+          <NotificationsBell />
           <span>
             {user.email}
             {profile?.team_name && (

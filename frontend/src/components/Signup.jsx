@@ -6,6 +6,7 @@ export default function Signup() {
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [team, setTeam] = useState("ops"); // Default to 'ops'
+
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const [success, setSuccess] = useState("");
@@ -28,6 +29,7 @@ export default function Signup() {
                     email,
                     password,
                     team,
+
                 }),
             });
 
@@ -115,6 +117,7 @@ export default function Signup() {
                             Determines what data you can access.
                         </p>
                     </div>
+
 
                     <button type="submit" className="btn-primary" disabled={loading}>
                         {loading ? "Creating Account..." : "Sign Up"}

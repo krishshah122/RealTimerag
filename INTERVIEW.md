@@ -1,5 +1,13 @@
 # Real-Time RAG Interview Guide
 
+> [!IMPORTANT]
+> **COMPREHENSIVE MASTER STUDY SUITE AVAILABLE:**
+> We have created an exhaustive, multi-file deep-dive documentation suite designed for AI engineering, solutions architect, and system design interviews. Please reference the dedicated files in the `docs/` folder:
+> 1. [System Architecture & Flows](file:///c:/Users/kriss/OneDrive/Documents/Desktop/realtimerag/rag/docs/01_SYSTEM_ARCHITECTURE_AND_FLOWS.md) — End-to-end diagrams, stream decoupling, database/vector schemas, and RBAC multi-tenancy.
+> 2. [Module & Function Reference](file:///c:/Users/kriss/OneDrive/Documents/Desktop/realtimerag/rag/docs/02_MODULE_AND_FUNCTION_REFERENCE.md) — Encyclopedic breakdown of every python class, method, RAG math formula, and React frontend component.
+> 3. [Tech Stack & Library Justifications](file:///c:/Users/kriss/OneDrive/Documents/Desktop/realtimerag/rag/docs/03_TECH_STACK_AND_LIBRARIES.md) — Senior-level engineering rationale behind Qdrant, BGE-Small, Groq, Redpanda, and LangGraph.
+> 4. [Professional Interview Q&A Bank](file:///c:/Users/kriss/OneDrive/Documents/Desktop/realtimerag/rag/docs/04_PROFESSIONAL_INTERVIEW_QA.md) — Elevator pitches, system design probing, ML RAG math defenses, and tough "Interviewer Grill" sample answers.
+
 This document is a project-specific interview preparation guide for the Real-Time RAG system in this repository. It covers architecture, design decisions, technology choices, tradeoffs, and likely viva or interview questions with strong sample answers.
 
 ## 1. Project Summary

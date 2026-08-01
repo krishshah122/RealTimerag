@@ -1,102 +1,79 @@
-import faiss
-import numpy as np
-from core.embeddings import EmbeddingModel
-from core.document_store import DocumentStore
-from config import EMBEDDING_DIM
-from core.persistence import load, save, current_version
-
 from langsmith import traceable
+
+from config import VECTOR_BACKEND
+
+
+def _create_backend():
+    if VECTOR_BACKEND == "faiss":
+        from core.vector_backends.faiss_backend import FaissBackend
+        print("Using FAISS vector backend (fallback/local mode)")
+        return FaissBackend()
+
+    from core.vector_backends.qdrant_backend import QdrantBackend
+    print("Using Qdrant vector backend")
+    return QdrantBackend()
+
+
 @traceable(name="vecstore")
 class VectorStore:
+    """Facade over Qdrant (default) or FAISS (optional fallback)."""
+
     def __init__(self):
-        self._load_from_disk()
+        self._backend = _create_backend()
 
-    def _load_from_disk(self):
-        index, docs = load()
+    @property
+    def backend_name(self) -> str:
+        return VECTOR_BACKEND
 
-        if index is not None and docs is not None:
-            self.index = index
-            self.store = DocumentStore()
-            self.store.docs = {int(k): v for k, v in docs.items()}
-            self.store.counter = max(self.store.docs.keys(), default=-1) + 1
-        else:
-            self.index = faiss.IndexIDMap(
-                faiss.IndexFlatIP(EMBEDDING_DIM)
-            )
-            self.store = DocumentStore()
+    @property
+    def store(self):
+        """Compatibility shim for code that reads store.docs."""
+        if hasattr(self._backend, "store"):
+            return self._backend.store
 
-        # 🔥 Track version
-        self.version = current_version()
+        class _PseudoStore:
+            def __init__(self, docs):
+                self.docs = docs
+
+            def all_texts(self):
+                return [v["text"] for v in self.docs.values()]
+
+        return _PseudoStore(self._backend.all_docs())
+
+    def iter_docs(self):
+        """Yield (text, metadata) for all indexed documents."""
+        for doc in self.store.docs.values():
+            yield doc["text"], doc.get("metadata", {}) or {}
+
+    def count(self) -> int:
+        if hasattr(self._backend, "count"):
+            return self._backend.count()
+        return len(self.store.docs)
 
     def _reload_if_needed(self):
-        latest = current_version()
-        if latest != self.version:
-            print("🔄 Reloading VectorStore from disk...")
-            self._load_from_disk()
+        if hasattr(self._backend, "reload"):
+            self._backend.reload()
 
     def add_document(self, text, metadata=None):
-        emb = EmbeddingModel.encode([text])
-        faiss.normalize_L2(emb)
-
-        doc_id = self.store.add(text, metadata)
-        self.index.add_with_ids(emb, np.array([doc_id]))
-
-        save(self.index, self.store.docs)
-
-        # Update version after save
-        self.version = current_version()
-        return doc_id
+        return self._backend.add_document(text, metadata)
 
     def delete_documents(self, *, issue_id=None, text=None, team_tag=None):
-        """
-        Delete documents from the vector store.
+        return self._backend.delete_documents(
+            issue_id=issue_id, text=text, team_tag=team_tag
+        )
 
-        Prefer matching by `metadata.issue_id`. For older entries that do not
-        persist the issue id in metadata, fall back to matching by `text` and
-        optional `team_tag`.
-        """
+    def search(self, query, k=4, team_tag=None, status=None, severity=None):
         self._reload_if_needed()
+        if hasattr(self._backend, "search"):
+            # Qdrant supports native metadata filters
+            import inspect
+            sig = inspect.signature(self._backend.search)
+            if "status" in sig.parameters:
+                return self._backend.search(
+                    query, k=k, team_tag=team_tag, status=status, severity=severity
+                )
+        return self._backend.search(query, k=k, team_tag=team_tag)
 
-        ids_to_delete = []
-        for doc_id, doc in self.store.docs.items():
-            metadata = doc.get("metadata", {}) or {}
-            issue_match = issue_id and metadata.get("issue_id") == issue_id
-            fallback_match = (
-                text is not None
-                and doc.get("text") == text
-                and (team_tag is None or metadata.get("team_tag") == team_tag)
-            )
-            if issue_match or fallback_match:
-                ids_to_delete.append(int(doc_id))
-
-        if not ids_to_delete:
-            return 0
-
-        self.index.remove_ids(np.array(ids_to_delete, dtype="int64"))
-        for doc_id in ids_to_delete:
-            self.store.docs.pop(doc_id, None)
-
-        save(self.index, self.store.docs)
-        self.version = current_version()
-        return len(ids_to_delete)
-
-    def search(self, query, k=4):
-        # 🔥 Always ensure fresh data
-        self._reload_if_needed()
-
-        q_emb = EmbeddingModel.encode([query])
-        faiss.normalize_L2(q_emb)
-
-        scores, ids = self.index.search(q_emb, k)
-
-        results = []
-        for s, i in zip(scores[0], ids[0]):
-            if i == -1:
-                continue
-            doc = self.store.get(int(i))
-            results.append({
-                "text": doc["text"],
-                "score": float(s),
-                "metadata": doc["metadata"]
-            })
-        return results
+    def reset(self):
+        if hasattr(self._backend, "reset"):
+            self._backend.reset()

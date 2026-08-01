@@ -22,7 +22,8 @@ rag/.env
 .env.local
 .env.*.local
 *.pem
-
+venv_packages
+__pycache__
 # ============ Node / Frontend ============
 node_modules/
 rag/frontend/node_modules/

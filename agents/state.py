@@ -2,10 +2,10 @@ from typing import List, Optional, TypedDict
 
 
 class RAGState(TypedDict, total=False):
-    # Core query + answer fields
     query: str
     docs: List[str]
     answer: str
-
-    # Team identifier used for multi-tenant retrieval / prompting
     team: Optional[str]
+    user_context: Optional[dict]
+    status_filter: Optional[str]
+    severity_filter: Optional[str]
