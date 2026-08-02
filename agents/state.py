@@ -9,3 +9,4 @@ class RAGState(TypedDict, total=False):
     user_context: Optional[dict]
     status_filter: Optional[str]
     severity_filter: Optional[str]
+    blocked_reason: Optional[str]

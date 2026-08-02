@@ -232,6 +232,20 @@ Final Score = (0.5 * Semantic Cosine Similarity) + (0.3 * BM25 TF-IDF Keyword Ra
 
 ---
 
+## Enterprise LLM Guardrails & Security Architecture
+
+The application implements a rigorous 3-layer security and token-optimization architecture in `core/guardrails.py`, designed specifically to pass enterprise DevSecOps and AI Safety audits:
+
+| Guardrail Layer | Target Component | Action & Architectural Protection |
+|---|---|---|
+| **Input Security Gate** | `retrieve_node` | Intercepts adversarial jailbreak keywords (`ignore previous instructions`, `bypass rbac`, `system prompt`, `drop table`) and blocks prompt injection before spending vector search or LLM tokens. |
+| **PII & Secret Scavenger** | `summarizer.py` & `nodes.py` | Automatically regex-scans all incident telemetry and queries, redacting AWS API keys (`AKIA...`), Bearer Tokens, and passwords (`[REDACTED_BY_GUARDRAIL]`) before transmission to third-party cloud LLM inferencing endpoints. |
+| **Groundedness Short-Circuit** | `answer_node` & `summarize_node` | If vector hybrid similarity search yields insufficient historical evidence (< 20 characters of grounded content), execution short-circuits with an anti-hallucination warning, saving **100% of Groq LLM API tokens**. |
+| **Output Integrity Gate** | `summarizer.py` | Locks parameter temperature at `0.0` for factual triage, suppresses assumption-based remediation guesses, and implements resilient JSON schema try/except fallback recovery. |
+| **Network & Auth Cache** | `app/auth.py` | Implements an in-memory 10-minute Time-To-Live (`CACHE_TTL_SECONDS = 600`) dictionary for Supabase JWKS cryptographic encryption keys and PostgreSQL profile hydration, eliminating network spam during React background notification polling. |
+
+---
+
 ## Environment Configuration
 
 ### Backend Setup (`rag/.env`)

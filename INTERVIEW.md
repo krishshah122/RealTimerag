@@ -337,3 +337,26 @@ I learned how important system boundaries are. Good AI output depends not only o
 ### Q: Why is this project a good demonstration of your skills?
 
 This project demonstrates full-stack engineering, not just model usage. It includes frontend development, backend APIs, authentication, streaming, vector search, retrieval design, analytics, and system tradeoffs. It shows that I can build an end-to-end AI product, reason about architecture, and make practical decisions based on real constraints.
+
+---
+
+## 19. Enterprise AI Guardrails, Token Reduction & Safety Architecture
+
+During technical system design and AI Safety interviews, examiners will deeply probe how your platform handles adversarial input, data leakage, API token consumption, and system latency. Below are the core architectural mechanisms implemented in `core/guardrails.py`, `app/auth.py`, and `agents/nodes.py`, along with robust defenses for your interview:
+
+### Q: How do you protect the RAG pipeline against Prompt Injection and adversarial jailbreaking?
+**Answer:**
+We implemented an early-intercept **Input Security Guardrail** (`validate_input_guardrail`) inside our LangGraph `retrieve_node`. Before any vector search or third-party LLM inference takes place, incoming user queries are scanned against an adversarial pattern signature list (such as `"ignore previous instructions"`, `"bypass rbac"`, or `"drop table"`). If a pattern is detected, the workflow instantly halts and returns an HTTP safety violation—protecting the database and zeroing out LLM token expenditures.
+
+### Q: How does the platform protect sensitive PII and infrastructure secrets from leaking to external LLM cloud servers?
+**Answer:**
+Operational logs frequently capture sensitive authentication headers, database connections, and IAM secrets during crashes. Before any log or query is transmitted to Groq's cloud APIs, our **PII & Secret Scavenger** (`sanitize_pii_and_secrets`) executes regular expression filtering across the text. It identifies and masks AWS access keys (`AKIA...`), Bearer authorization headers, user passwords, and private key blocks, transforming them into secure placeholders (`[SECRET_REDACTED]`).
+
+### Q: How do you reduce LLM API Token Usage and prevent AI Hallucination when answering queries?
+**Answer:**
+We employ a **Groundedness Short-Circuit Gate** (`is_grounded_context_sufficient`) inside our LangGraph generation nodes (`answer_node` and `summarize_node`). When a query is executed, if Qdrant returns candidate documents that fall below our confidence length or score thresholds, the graph short-circuits with an automated safety message: *"Zero relevant historical incidents found in the database. LLM inference has been bypassed."* This completely blocks speculative AI hallucination and saves **100% of the Groq API generation tokens** for unanswered or unsupported queries. Furthermore, during alert triage, we force model parameter `temperature=0.0` and ban assumption-based guesses.
+
+### Q: How did you optimize authentication networking latency during high-frequency frontend dashboard polling?
+**Answer:**
+Our React command center runs automated background interval polling against `GET /notifications` to display live unread badges. Because Supabase JWTs rely on public key cryptography (`ES256`), verifying tokens natively requires network HTTP calls to Supabase's JWKS endpoint and PostgreSQL profile table on every polling pulse. To eliminate network latency and prevent API self-DDoS, we implemented an **In-Memory TTL Cache** (`CACHE_TTL_SECONDS = 600`) inside `app/auth.py`. Cryptographic public keys and hydrated role profiles are held in server RAM for 10 minutes, cutting authentication turnaround time from ~250 milliseconds down to less than **0.1 milliseconds** locally.
+

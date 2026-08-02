@@ -9,6 +9,7 @@ from config import LLM_MODEL
 from dotenv import load_dotenv
 import os
 from langsmith import traceable
+from core.guardrails import validate_input_guardrail, sanitize_pii_and_secrets, is_grounded_context_sufficient
 
 load_dotenv()
 
@@ -41,6 +42,10 @@ def retrieve_node(state, _):
     Hybrid retrieval with team filtering, recency weighting, and lifecycle filters.
     """
     query = state["query"]
+    is_valid, processed_query = validate_input_guardrail(query)
+    if not is_valid:
+        return {"docs": [], "blocked_reason": processed_query}
+    query = sanitize_pii_and_secrets(processed_query)
     team = state.get("team")
     status_filter = state.get("status_filter")
     severity_filter = state.get("severity_filter")
@@ -109,7 +114,15 @@ def _system_prompt_for_team(team: str | None, user_context: dict | None = None) 
 
 @traceable(name="answer_node")
 async def answer_node(state):
-    context = "\n".join(state["docs"])
+    if state.get("blocked_reason"):
+        return {"answer": state["blocked_reason"]}
+
+    if not is_grounded_context_sufficient(state.get("docs", [])):
+        return {
+            "answer": "🔒 **Groundedness Guard Active:** Zero relevant historical incidents matching your inquiry were found in the vector database. LLM inference has been automatically bypassed to prevent AI hallucination and conserve API token consumption."
+        }
+
+    context = sanitize_pii_and_secrets("\n".join(state["docs"]))
     team = state.get("team")
     user_context = state.get("user_context")
     system_prompt = _system_prompt_for_team(team, user_context)
@@ -138,7 +151,13 @@ Question:
 @traceable(name="summarize_node")
 async def summarize_node(state):
     """Summarize retrieved incidents into structured output."""
-    context = "\n".join(state.get("docs", []))
+    if state.get("blocked_reason"):
+        return {"answer": state["blocked_reason"]}
+
+    if not is_grounded_context_sufficient(state.get("docs", [])):
+        return {"answer": "No valid historical incident context available for summarization."}
+
+    context = sanitize_pii_and_secrets("\n".join(state.get("docs", [])))
     prompt = f"""Summarize these operational incidents. Provide:
 1. Executive summary (2-3 sentences)
 2. Root cause patterns

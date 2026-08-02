@@ -25,8 +25,6 @@ print(f"  TEAM FILTER: {team or 'None (all teams)'}")
 print("=" * 70)
 
 store = VectorStore()
-
-# ── STEP 1: Dense / Semantic Search (Qdrant) ──
 print("\n[STEP 1] DENSE SEARCH (Qdrant embeddings)")
 print("-" * 50)
 dense_results = DenseRetriever(store).search(query, 8)

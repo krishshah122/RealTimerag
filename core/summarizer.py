@@ -6,6 +6,7 @@ from groq import AsyncGroq
 from dotenv import load_dotenv
 
 from config import LLM_MODEL
+from core.guardrails import sanitize_pii_and_secrets
 
 load_dotenv()
 client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
@@ -14,6 +15,7 @@ client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
 async def summarize_incident(text: str, metadata: dict | None = None) -> dict:
     """Generate structured summary fields for an incident."""
     meta = metadata or {}
+    text = sanitize_pii_and_secrets(text)
     context = f"Severity: {meta.get('severity', 'unknown')}\nService: {meta.get('service', 'unknown')}\nTeam: {meta.get('team_tag', 'unknown')}\n\nIncident:\n{text}"
 
     prompt = f"""Analyze this operational incident and respond in JSON format with exactly these keys:
