@@ -6,7 +6,6 @@ A production-inspired Retrieval-Augmented Generation (RAG) system for engineerin
 
 Unlike traditional RAG systems that rely on static documents, this platform continuously ingests incident events, indexes them with lifecycle metadata, and enables team-specific question answering through a secure dashboard.
 
-> **Interview positioning:** Describe this as *"a production-inspired incident intelligence system demonstrating real-time ingestion, team-aware retrieval, hybrid search, authenticated access, analytics, and LLM-powered incident investigation workflows."*
 
 ---
 
