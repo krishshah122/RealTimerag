@@ -63,14 +63,20 @@ def apply_recency_boost(
         return []
 
     max_score = max((d.get("score", 0) for d in docs), default=1.0) or 1.0
+    max_bm25 = max((max(d.get("bm25_score", 0), 0) for d in docs), default=0.0)
+    max_rrf = max((d.get("rrf_score", 0) for d in docs), default=0.0)
 
     boosted = []
     for d in docs:
         meta = d.get("metadata", {}) or {}
         sem = d.get("score", 0) / max_score
-        bm25 = d.get("bm25_score", 0)
+        bm25 = max(d.get("bm25_score", 0), 0) / max_bm25 if max_bm25 else 0
         rec = recency_score(meta.get("timestamp"), meta.get("severity"))
-        final = semantic_weight * sem + bm25_weight * bm25 + recency_weight * rec
+        if max_rrf:
+            relevance = d.get("rrf_score", 0) / max_rrf
+            final = (semantic_weight + bm25_weight) * relevance + recency_weight * rec
+        else:
+            final = semantic_weight * sem + bm25_weight * bm25 + recency_weight * rec
         boosted.append({**d, "recency_score": rec, "final_score": final})
 
     boosted.sort(key=lambda x: x["final_score"], reverse=True)

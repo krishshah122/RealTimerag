@@ -13,16 +13,15 @@ def clean_text(text):
 def simple_rerank(query, docs):
     query_words = set(clean_text(query).split())
     scored = []
-    
+    query_word_count = max(len(query_words), 1)
+
     for d in docs:
-        # Clean the document text before splitting
         doc_words = set(clean_text(d["text"]).split())
-        
-        # Calculate overlap
         overlap = len(query_words & doc_words)
-        scored.append((overlap, d))
-    
-    # Sort by overlap score in descending order
-    scored.sort(reverse=True, key=lambda x: x[0])
-    
-    return [d for _, d in scored]
+        lexical_score = overlap / query_word_count
+        retrieval_score = d.get("final_score", 0)
+        scored.append((0.7 * retrieval_score + 0.3 * lexical_score, d))
+
+    scored.sort(key=lambda item: item[0], reverse=True)
+
+    return [doc for _, doc in scored]

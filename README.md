@@ -49,7 +49,15 @@ graph TD
     M -->|Dense Query| J
     M -->|Sparse Query| N[BM25 Lexical Index]
     M -->|RRF + Recency Decay + Overlap Reranking| O[Top 3 Grounded Context Docs]
-    O -->|Synthesize| P[Groq LLM: Llama 3.1 8B]
+    O --> Q{LangGraph route}
+    Q -->|ask: parallel| R[Incident Analyst]
+    Q -->|ask: parallel| S[Remediation Analyst]
+    Q -->|single agent when disabled| P
+    R --> T[Grounded Synthesis]
+    S --> T
+    Q -->|summarize| U[Incident Summarizer]
+    T --> P[Groq LLM: Llama 3.1 8B]
+    U --> P
     P -->|Return AI Intelligence| L
 ```
 
@@ -147,6 +155,25 @@ rag/
 | POST | `/summarize` | Generate intelligent executive summary across incidents matching a topic query |
 | POST | `/recommend` | Extract actionable operational resolution suggestions from historical incidents |
 | GET | `/documents` | List indexed text documents (requires JWT authentication, team-scoped) |
+
+#### LangGraph workflow
+
+`/ask` retrieves evidence once, then LangGraph fans out to two async specialist nodes
+(incident analysis and remediation analysis) in parallel. A synthesis node combines
+their evidence-bound notes into the response. `/summarize` keeps a single summarizer
+path, and blocked or empty retrieval results bypass all LLM calls. Set
+`RAG_MULTI_AGENT_ENABLED=false` to return `/ask` to the lower-cost single-answer-node
+workflow. Both compiled workflows are reused across requests. The parallel mode makes
+three LLM calls per successful `/ask` (two specialists plus synthesis), trading token
+cost for role separation; tune specialist output limits and evaluate answer quality and
+latency against representative queries before rollout.
+
+The BM25 corpus/index is cached per process, invalidated by writes made through
+`VectorStore`, and refreshed at least every 30 seconds to observe updates from other
+processes. It still requires a full corpus scan on refresh and is not a substitute for a
+distributed sparse index. For large or rapidly changing corpora, benchmark Qdrant sparse
+vectors or a dedicated lexical-search service rather than assuming the in-process cache
+removes the corpus-scan cost.
 
 ### Notifications
 | Method | Path | Description |

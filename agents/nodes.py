@@ -1,6 +1,6 @@
 from retrieval.dense import DenseRetriever
-from retrieval.bm import SparseRetriever
-from retrieval.rrf import rrf
+from retrieval.bm import get_cached_sparse_retriever
+from retrieval.rrf import rrf_scores
 from retrieval.rerank import simple_rerank
 from retrieval.recency import apply_recency_boost, within_recency_window
 from core.vector_store import VectorStore
@@ -37,7 +37,7 @@ def _filter_docs(docs: list, team: str | None, status_filter: str | None, severi
 
 
 @traceable(name="retrieve_node")
-def retrieve_node(state, _):
+def retrieve_node(state, vector_store: VectorStore):
     """
     Hybrid retrieval with team filtering, recency weighting, and lifecycle filters.
     """
@@ -50,24 +50,21 @@ def retrieve_node(state, _):
     status_filter = state.get("status_filter")
     severity_filter = state.get("severity_filter")
 
-    vector_store = VectorStore()
-
-    dense = DenseRetriever(vector_store).search(query, 8)
+    dense = DenseRetriever(vector_store).search(
+        query,
+        8,
+        team_tag=team,
+        status=status_filter,
+        severity=severity_filter,
+    )
     dense = _filter_docs(dense, team, status_filter, severity_filter)
 
-    if team:
-        texts = [text for text, meta in vector_store.iter_docs() if meta.get("team_tag") == team]
-    else:
-        texts = vector_store.store.all_texts()
-
-    sparse = SparseRetriever(texts).search(query, 8) if texts else []
+    sparse_retriever, text_to_meta = get_cached_sparse_retriever(vector_store, team)
+    sparse = sparse_retriever.search(query, 8)
 
     sparse_docs = []
-    text_to_meta = {text: meta for text, meta in vector_store.iter_docs()}
     for text, bm25_score in sparse:
         meta = text_to_meta.get(text, {})
-        if team and meta.get("team_tag") != team:
-            continue
         if status_filter and meta.get("status", "OPEN") != status_filter.upper():
             continue
         if severity_filter and meta.get("severity", "").lower() != severity_filter.lower():
@@ -82,16 +79,26 @@ def retrieve_node(state, _):
     for d in dense:
         dense_enriched.append({**d, "bm25_score": bm25_map.get(d["text"], 0)})
 
-    fused = rrf(dense_enriched, [(d["text"], d["bm25_score"]) for d in sparse_docs])
-    fused_docs = []
+    fused = rrf_scores(
+        dense_enriched,
+        [(d["text"], d["bm25_score"]) for d in sparse_docs],
+    )
     all_by_text = {d["text"]: d for d in dense_enriched}
-    for t in sparse_docs:
-        all_by_text.setdefault(t["text"], t)
-    for text in fused:
-        fused_docs.append(all_by_text.get(text, {"text": text, "score": 0, "metadata": {}}))
+    for doc in sparse_docs:
+        all_by_text.setdefault(doc["text"], doc)
+    fused_docs = [
+        {
+            **all_by_text.get(text, {"text": text, "score": 0, "metadata": {}}),
+            "rrf_score": score,
+        }
+        for text, score in fused
+    ]
 
     boosted = apply_recency_boost(fused_docs)
-    reranked = simple_rerank(query, [{"text": d["text"], "final_score": d.get("final_score", 0)} for d in boosted])
+    reranked = simple_rerank(
+        query,
+        [{"text": d["text"], "final_score": d.get("final_score", 0)} for d in boosted],
+    )
 
     return {"docs": [d["text"] for d in reranked[:3]]}
 
@@ -112,15 +119,95 @@ def _system_prompt_for_team(team: str | None, user_context: dict | None = None) 
     return base_prompt
 
 
+def _has_grounded_context(state) -> bool:
+    return is_grounded_context_sufficient(state.get("docs", []))
+
+
+def _no_context_answer(state):
+    if state.get("blocked_reason"):
+        return {"answer": state["blocked_reason"]}
+    return {
+        "answer": "🔒 **Groundedness Guard Active:** Zero relevant historical incidents matching your inquiry were found in the vector database. LLM inference has been automatically bypassed to prevent AI hallucination and conserve API token consumption."
+    }
+
+
+async def _run_specialist(state, role: str, instructions: str, output_key: str):
+    context = sanitize_pii_and_secrets("\n".join(state["docs"]))
+    prompt = f"""{_system_prompt_for_team(state.get("team"))}
+
+You are the {role} specialist in a two-specialist incident analysis workflow.
+Use ONLY the incident evidence below. Do not invent facts or add external assumptions.
+Return at most 5 concise bullet points. State when the evidence is insufficient.
+
+Task:
+{instructions}
+
+Incident evidence:
+{context}
+
+Question:
+{state['query']}"""
+
+    response = await client.chat.completions.create(
+        model=LLM_MODEL,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2,
+        max_tokens=250,
+    )
+    return {output_key: response.choices[0].message.content or ""}
+
+
+@traceable(name="incident_analyst")
+async def incident_analyst_node(state):
+    return await _run_specialist(
+        state,
+        "incident-analysis",
+        "Identify matching incidents, their severity/status/recency, and evidenced root-cause or impact patterns.",
+        "incident_analysis",
+    )
+
+
+@traceable(name="remediation_analyst")
+async def remediation_analyst_node(state):
+    return await _run_specialist(
+        state,
+        "remediation",
+        "Identify remediation actions explicitly supported by the incidents. Separate recorded actions from cautious recommendations.",
+        "remediation_analysis",
+    )
+
+
+@traceable(name="synthesis_node")
+async def synthesis_node(state):
+    prompt = f"""Synthesize the two specialist notes into a direct answer to the question.
+Use ONLY the notes below; do not introduce facts or assumptions. If they conflict or lack evidence, say so.
+Keep the answer concise, explain the relevant incident evidence, and distinguish recorded remediation from recommendations.
+Do not include greetings or sign-offs.
+
+Incident analysis:
+{state.get("incident_analysis", "")}
+
+Remediation analysis:
+{state.get("remediation_analysis", "")}
+
+Question:
+{state["query"]}"""
+    response = await client.chat.completions.create(
+        model=LLM_MODEL,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2,
+        max_tokens=500,
+    )
+    return {"answer": response.choices[0].message.content}
+
+
 @traceable(name="answer_node")
 async def answer_node(state):
     if state.get("blocked_reason"):
         return {"answer": state["blocked_reason"]}
 
-    if not is_grounded_context_sufficient(state.get("docs", [])):
-        return {
-            "answer": "🔒 **Groundedness Guard Active:** Zero relevant historical incidents matching your inquiry were found in the vector database. LLM inference has been automatically bypassed to prevent AI hallucination and conserve API token consumption."
-        }
+    if not _has_grounded_context(state):
+        return _no_context_answer(state)
 
     context = sanitize_pii_and_secrets("\n".join(state["docs"]))
     team = state.get("team")
@@ -155,7 +242,7 @@ async def summarize_node(state):
     if state.get("blocked_reason"):
         return {"answer": state["blocked_reason"]}
 
-    if not is_grounded_context_sufficient(state.get("docs", [])):
+    if not _has_grounded_context(state):
         return {"answer": "No valid historical incident context available for summarization."}
 
     context = sanitize_pii_and_secrets("\n".join(state.get("docs", [])))

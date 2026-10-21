@@ -108,6 +108,8 @@ async def register_user(req: RegisterRequest):
 
 
 store = VectorStore()
+ask_graph = build_graph(store, mode="ask")
+summarize_graph = build_graph(store, mode="summarize")
 
 
 @traceable(name="ask_request", run_type="chain")
@@ -128,7 +130,7 @@ async def _handle_ask(
             run_tree.add_metadata({"thread_id": request_id})
         except Exception as e:
             print(f"Failed to set LangSmith run metadata: {e}")
-    graph = build_graph(store, mode=mode)
+    graph = summarize_graph if mode == "summarize" else ask_graph
     initial_state: dict = {"query": query}
     if team:
         initial_state["team"] = team

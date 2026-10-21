@@ -1,6 +1,10 @@
 from langsmith import traceable
+from threading import Lock
 
 from config import VECTOR_BACKEND
+
+
+_revision_lock = Lock()
 
 
 def _create_backend():
@@ -18,12 +22,24 @@ def _create_backend():
 class VectorStore:
     """Facade over Qdrant (default) or FAISS (optional fallback)."""
 
+    _corpus_revision = 0
+
     def __init__(self):
         self._backend = _create_backend()
 
     @property
     def backend_name(self) -> str:
         return VECTOR_BACKEND
+
+    @property
+    def corpus_revision(self) -> int:
+        with _revision_lock:
+            return VectorStore._corpus_revision
+
+    @staticmethod
+    def _mark_corpus_changed() -> None:
+        with _revision_lock:
+            VectorStore._corpus_revision += 1
 
     @property
     def store(self):
@@ -55,12 +71,17 @@ class VectorStore:
             self._backend.reload()
 
     def add_document(self, text, metadata=None):
-        return self._backend.add_document(text, metadata)
+        doc_id = self._backend.add_document(text, metadata)
+        self._mark_corpus_changed()
+        return doc_id
 
     def delete_documents(self, *, issue_id=None, text=None, team_tag=None):
-        return self._backend.delete_documents(
+        deleted = self._backend.delete_documents(
             issue_id=issue_id, text=text, team_tag=team_tag
         )
+        if deleted:
+            self._mark_corpus_changed()
+        return deleted
 
     def search(self, query, k=4, team_tag=None, status=None, severity=None):
         self._reload_if_needed()
@@ -77,3 +98,4 @@ class VectorStore:
     def reset(self):
         if hasattr(self._backend, "reset"):
             self._backend.reset()
+            self._mark_corpus_changed()

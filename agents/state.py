@@ -5,6 +5,8 @@ class RAGState(TypedDict, total=False):
     query: str
     docs: List[str]
     answer: str
+    incident_analysis: str
+    remediation_analysis: str
     team: Optional[str]
     user_context: Optional[dict]
     status_filter: Optional[str]

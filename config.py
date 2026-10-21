@@ -5,6 +5,7 @@ EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
 EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "384"))
 TOP_K = int(os.getenv("TOP_K", "5"))
 LLM_MODEL = os.getenv("LLM_MODEL", "llama-3.1-8b-instant")
+RAG_MULTI_AGENT_ENABLED = os.getenv("RAG_MULTI_AGENT_ENABLED", "true").lower() == "true"
 
 # Vector backend: "qdrant" (default) or "faiss" (local fallback)
 VECTOR_BACKEND = os.getenv("VECTOR_BACKEND", "qdrant").lower()
