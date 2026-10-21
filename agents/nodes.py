@@ -134,6 +134,7 @@ Using ONLY the incident context below:
 - Note severity, status, and recency when available
 - Do NOT copy sentences verbatim
 - Do NOT add external assumptions
+- Do not include conversational greetings, email sign-offs, or introductions; output direct analysis only
 
 Context:
 {context}
