@@ -8,16 +8,6 @@ logging.basicConfig(level=logging.INFO)
 from langsmith import traceable
 
 
-# Try to import SentenceTransformer; if unavailable (or torch missing),
-# fall back to a lightweight deterministic pseudo-embedding for dev.
-_HAS_ST = False
-try:
-    from sentence_transformers import SentenceTransformer
-    _HAS_ST = True
-except Exception:
-    SentenceTransformer = None
-
-
 def _pseudo_embedding(text: str, dim: int = 512) -> np.ndarray:
     # Deterministic RNG seeded from text hash -> reproducible embeddings
     h = int(hashlib.sha256(text.encode("utf-8")).hexdigest()[:16], 16)
@@ -39,7 +29,14 @@ class EmbeddingModel:
         if cls._model is None:
             with cls._lock:
                 if cls._model is None:
-                    if _HAS_ST and EMBEDDING_MODEL:
+                    if EMBEDDING_MODEL:
+                        try:
+                            from sentence_transformers import SentenceTransformer
+                        except ImportError as exc:
+                            raise RuntimeError(
+                                "sentence-transformers is required when "
+                                "EMBEDDING_MODEL is configured."
+                            ) from exc
                         logging.info("🔥 Loading SentenceTransformer model (ONCE)...")
                         cls._model = SentenceTransformer(EMBEDDING_MODEL)
                         logging.info("✅ SentenceTransformer model loaded")
