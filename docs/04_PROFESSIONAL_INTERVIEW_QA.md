@@ -17,7 +17,7 @@ This document compiles realistic technical questions, architectural probes, and 
 
 ### Q1: Give me a 30-second explanation of your project.
 **Expected Answer:**
-"I built an enterprise-grade Real-Time RAG platform designed for live operational incident intelligence. Unlike standard static chatbots that rely on outdated document indexes, my system ingests real-time DevOps and Security alerting streams through Kafka and Redpanda, transforms logs into dense semantic embeddings using local CPU models, and indexes them in Qdrant. When engineers query the system via our React dashboard, LangGraph orchestrates a hybrid retrieval pipeline combining vector semantic search, BM25 exact keyword matching, and reciprocal rank fusion to generate accurate, zero-hallucination troubleshooting intelligence in under a second using Groq inference."
+"I built a Real-Time RAG platform designed for operational incident intelligence. It ingests DevOps and Security incidents through Kafka/Redpanda, creates local dense embeddings, and stores them in a shared Pinecone index. When engineers query the React dashboard, LangGraph combines vector search, BM25 keyword matching, and reciprocal rank fusion before Groq generates a response grounded in the retrieved incident context."
 
 ### Q2: What exact real-world problem does this platform solve? Why wouldn't an engineering team just use traditional Elasticsearch or Kibana dashboards?
 **Expected Answer:**
@@ -30,11 +30,11 @@ This document compiles realistic technical questions, architectural probes, and 
 ### Q3: Why did you design a decoupled architecture separating ingestion from querying? Why not just insert vector embeddings synchronously inside the POST HTTP request?
 **Expected Answer:**
 "Synchronous ML embedding and index insertions take anywhere from 20 to 100 milliseconds. Under normal traffic that seems fast, but during a major service outage, microservices can easily blast hundreds of cascading error alerts per second. If our public ingestion HTTP API locked up generating vector embeddings synchronously, concurrent API threads would exhaust server connections, triggering widespread client timeouts and API failure cascades. 
-By interposing an asynchronous **Redpanda / Kafka** event streaming buffer, our REST API simply validates the payload, pushes a simple JSON event to the topic, and immediately yields an HTTP 200 acknowledgment in under **2 milliseconds**. Dedicated background consumer worker loops pull events asynchronously from the stream to perform CPU-heavy vectorization and Qdrant index updates without ever risking public API degradation."
+By interposing an asynchronous **Redpanda / Kafka** event streaming buffer, our REST API validates the payload and publishes a JSON event to the topic. A separate consumer performs embedding and writes vectors to Pinecone, keeping vectorization off the request path."
 
 ### Q4: Explain how data remains consistent between your relational databases and your vector indexes. What happens if an incident is deleted or resolved?
 **Expected Answer:**
-"Our architecture establishes strict domain separation: SQLite serves as the definitive authoritative system-of-record for relational state transitions (such as moving an incident from `OPEN` to `RESOLVED` and logging audit timelines), while **Qdrant** acts as our real-time semantic retrieval index. When a status transition occurs via the API, the business controller updates our relational `incidents` table and simultaneously commits an atomic payload update directly to Qdrant's point metadata. Furthermore, we maintain database cleanliness via automated background cron jobs using **APScheduler** (`jobs/cleanup.py`), which wakes up at midnight to archive closed incidents older than 30 days and execute matching point deletion sweeps in Qdrant, preventing stale data from diluting future retrieval relevance."
+"SQLite is the authoritative store for incident lifecycle transitions and timeline events. Kafka/Redpanda transports new incidents asynchronously to the consumer, which indexes their text and metadata in Pinecone. These writes are not one distributed transaction: if Kafka publication or indexing fails, the relational incident may exist without a vector. Deletion and retention jobs remove associated vectors through the configured backend. Lifecycle metadata is captured at ingestion; keeping later status changes synchronized with vector metadata requires an explicit update/reindex path."
 
 ---
 
@@ -44,7 +44,7 @@ By interposing an asynchronous **Redpanda / Kafka** event streaming buffer, our 
 **Expected Answer:**
 "Dense semantic vector search excels at conceptual matching—it understands that 'server crash' is conceptually equivalent to 'node failure'. However, dense embedding vector space is fundamentally flawed when dealing with highly unique, out-of-vocabulary technical identifiers such as UUIDs, precise IP addresses (`192.168.1.55`), specific error codes (`ORA-12154`), or Kubernetes pod hash identifiers. A vector model often blends numbers and codes together as generic text tokens.
 To solve this, I designed a **Hybrid Retrieval** pipeline:
-1. **Dense Retrieval:** Runs cosine similarity against 384-dimensional embeddings in **Qdrant** to capture high-level conceptual similarity.
+1. **Dense Retrieval:** Runs cosine similarity against 384-dimensional embeddings in **Pinecone** to capture high-level conceptual similarity.
 2. **Sparse Retrieval:** Simultaneously processes the localized text corpus through a **BM25Okapi** lexical TF-IDF algorithm to guarantee exact keyword, UUID, and hostname matching.
 By combining both paradigms, we achieve best-in-class accuracy for both natural language diagnostics and exact log identifier lookups."
 
@@ -71,7 +71,7 @@ Where $\lambda$ represents our decay velocity constant ($0.1$). This guarantees 
 "Data privacy is paramount; a DevOps engineer should never inadvertently gain query exposure to ongoing employee forensic security investigations or confidential corporate HR security anomalies.
 Our security enforcement operates at three distinct analytical boundaries:
 1. **Cryptographic Authentication Verification:** Every client HTTP interaction mandates a valid Supabase JSON Web Token (`Authorization: Bearer <jwt>`). Our FastAPI security middleware intercepts requests to decode tokens against official JWKS keys and pulls verified immutable profile properties (`email`, `role`, `team_name`) directly from secure PostgreSQL relational records.
-2. **Database Level Pre-Filtering in Qdrant:** When a query hits our LangGraph retrieval nodes, we never rely on application-level post-filtering. Instead, the verified user's `team_name` (e.g., `devops`) is compiled directly into Qdrant's core execution query payload via strict `FieldCondition(key="team_tag", match=MatchValue(value="devops"))`. Qdrant applies an instant graph segmentation *prior* to calculating similarity scores, mathematically ensuring zero cross-team vector leakage.
+2. **Metadata Filtering in Pinecone:** The authenticated user's team is included in the Pinecone vector query filter (for example, `{"team_tag": {"$eq": "devops"}}`). This narrows retrieval results, while FastAPI's authorization checks remain the security boundary; vector filtering does not replace access control.
 3. **Role-Based Access Control (RBAC):** Using custom FastAPI injection dependencies (`require_roles(['admin', 'sre'])`), destructive state alterations—such as forcing index resets or modifying active incident classification state machines—are strictly prohibited from lower-privileged general analyst roles."
 
 ---
@@ -83,12 +83,11 @@ Our security enforcement operates at three distinct analytical boundaries:
 "I intentionally rejected cloud API embeddings for three critical architectural reasons:
 1. **Data Confidentiality & Compliance:** Operational server error logs consistently leak plain-text stack traces containing internal database query fragments, network topology structures, and occasional memory core dumps. Piping sensitive corporate diagnostic logs over the public internet to third-party model providers violates corporate security frameworks like ISO 27001 and SOC 2.
 2. **Network Latency Under Load:** Cloud APIs add 100ms–300ms of internet RTT per item and introduce hard rate-limit throttling during alert storms. By housing HuggingFace SentenceTransformer models directly inside our worker nodes, embedding inference runs completely offline in under **8 milliseconds**.
-3. **Dimensional Efficiency:** While large 1536-dimensional models offer marginal gains on conversational general knowledge, MTEB benchmarks demonstrate that **BGE-Small** at **384 dimensions** matches or exceeds precision when organizing technical syntax and operational code strings, while consuming **75% less vector RAM** in Qdrant—a substantial enterprise infrastructure cost savings."
+3. **Dimensional Efficiency:** BGE-Small produces 384-dimensional vectors, reducing vector storage and query payload size compared with larger embedding dimensions. The Pinecone index must be created with the same configured dimension."
 
 ### Q10: What happens if your Kafka / Redpanda consumer worker goes down for 2 hours during an incident? How does your system recover when brought back online?
 **Expected Answer:**
-"Because we decouple our ingestion API from our consumers via Redpanda, our public REST API endpoints never drop requests when workers experience outages; incoming alerts simply continue accumulating safely inside persistent Kafka topic partitions (`live_issues`).
-When our worker service reboots, it connects using an enduring **Kafka Consumer Group ID** with offset persistence enabled. Rather than losing data or dropping newly arrived incidents, the worker simply picks up processing sequentially from the precise numerical partition offset recorded before the crash. It rapidly churns through the backlog, embedding and indexing outstanding points into Qdrant in chronological consistency until ingestion latency achieves real-time equilibrium."
+"Redpanda can retain messages while a consumer is offline, subject to the topic's retention policy. However, the current consumer does not configure an explicit `group_id` and disables auto-commit in that mode, so this implementation should not claim durable group-offset recovery. Before relying on worker restarts in deployment, configure a stable consumer group and deliberate offset/commit behavior, then verify replay handling; Pinecone upserts use the incident ID when available to make reprocessing that event idempotent."
 
 ### Q11: You are currently utilizing SQLite to handle analytics telemetry. SQLite famously suffers from database write concurrency locking (`database is locked` errors). How do you justify this design, and how would you evolve it for a massive production deployment?
 **Expected Answer:**

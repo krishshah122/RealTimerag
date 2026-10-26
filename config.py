@@ -1,5 +1,9 @@
 import os
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 # Embeddings — BGE-small for production-inspired setup; falls back to MiniLM
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
 EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "384"))
@@ -7,10 +11,15 @@ TOP_K = int(os.getenv("TOP_K", "5"))
 LLM_MODEL = os.getenv("LLM_MODEL", "llama-3.1-8b-instant")
 RAG_MULTI_AGENT_ENABLED = os.getenv("RAG_MULTI_AGENT_ENABLED", "true").lower() == "true"
 
-# Vector backend: "qdrant" (default) or "faiss" (local fallback)
-VECTOR_BACKEND = os.getenv("VECTOR_BACKEND", "qdrant").lower()
+# Vector backend: Pinecone (default), Qdrant, or FAISS (local fallback)
+VECTOR_BACKEND = os.getenv("VECTOR_BACKEND", "pinecone").lower()
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY", "").strip()
+PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "").strip()
+PINECONE_NAMESPACE = os.getenv("PINECONE_NAMESPACE", "incidents").strip()
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
+QDRANT_URL = os.getenv("QDRANT_URL", "").strip()
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "").strip()
 QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "incidents")
 
 # Recency windows (days) by severity

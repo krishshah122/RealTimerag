@@ -5,12 +5,12 @@ Run: python check_qdrant.py
 import os, json
 os.environ["PYTHONIOENCODING"] = "utf-8"
 
-from qdrant_client import QdrantClient
 from core.embeddings import EmbeddingModel
+from core.qdrant_connection import create_qdrant_client
 from qdrant_client.models import Filter, FieldCondition, MatchValue
-from config import QDRANT_HOST, QDRANT_PORT, QDRANT_COLLECTION
+from config import QDRANT_COLLECTION
 
-c = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT, check_compatibility=False)
+c = create_qdrant_client()
 
 # 1. How many documents are embedded in Qdrant?
 info = c.get_collection(QDRANT_COLLECTION)

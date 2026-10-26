@@ -1,3 +1,7 @@
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from fastapi import FastAPI, Body, Depends, Query, HTTPException
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,7 +13,6 @@ from app.analytics import router as analytics_router
 from app.notifications import router as notifications_router
 from app.admin import router as admin_router
 from core.analytics import AnalyticsManager
-from dotenv import load_dotenv
 from langsmith import traceable
 from langsmith.run_helpers import get_current_run_tree
 from app.auth import auth_middleware, get_current_user, UserContext, supabase
@@ -21,25 +24,18 @@ import time
 import os
 import uuid
 
-load_dotenv()
-
 print("LangSmith enabled:", os.getenv("LANGCHAIN_TRACING_V2"))
 print("Project:", os.getenv("LANGSMITH_PROJECT"))
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from config import VECTOR_BACKEND, QDRANT_HOST, QDRANT_PORT
+    from config import VECTOR_BACKEND
 
-    if VECTOR_BACKEND == "qdrant":
-        try:
-            from qdrant_client import QdrantClient
-            client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT, check_compatibility=False)
-            client.get_collections()
-            print(f"Qdrant connected at {QDRANT_HOST}:{QDRANT_PORT}")
-        except Exception as e:
-            print(f"WARNING: Qdrant not reachable at {QDRANT_HOST}:{QDRANT_PORT} — {e}")
-            print("Start with: docker compose up -d qdrant")
+    try:
+        print(f"{VECTOR_BACKEND} connected; indexed documents: {store.count()}")
+    except Exception as e:
+        print(f"WARNING: {VECTOR_BACKEND} vector backend check failed — {e}")
 
     start_scheduler_in_thread()
     yield

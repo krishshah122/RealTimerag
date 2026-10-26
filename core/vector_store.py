@@ -13,14 +13,24 @@ def _create_backend():
         print("Using FAISS vector backend (fallback/local mode)")
         return FaissBackend()
 
-    from core.vector_backends.qdrant_backend import QdrantBackend
-    print("Using Qdrant vector backend")
-    return QdrantBackend()
+    if VECTOR_BACKEND == "qdrant":
+        from core.vector_backends.qdrant_backend import QdrantBackend
+        print("Using Qdrant vector backend")
+        return QdrantBackend()
+
+    if VECTOR_BACKEND == "pinecone":
+        from core.vector_backends.pinecone_backend import PineconeBackend
+        print("Using Pinecone vector backend")
+        return PineconeBackend()
+
+    raise ValueError(
+        f"Unsupported VECTOR_BACKEND {VECTOR_BACKEND!r}; choose pinecone, qdrant, or faiss"
+    )
 
 
 @traceable(name="vecstore")
 class VectorStore:
-    """Facade over Qdrant (default) or FAISS (optional fallback)."""
+    """Facade over Pinecone, Qdrant, or FAISS vector backends."""
 
     _corpus_revision = 0
 
@@ -86,7 +96,7 @@ class VectorStore:
     def search(self, query, k=4, team_tag=None, status=None, severity=None):
         self._reload_if_needed()
         if hasattr(self._backend, "search"):
-            # Qdrant supports native metadata filters
+            # Remote vector backends support native metadata filters.
             import inspect
             sig = inspect.signature(self._backend.search)
             if "status" in sig.parameters:

@@ -10,7 +10,7 @@ This document details the exact engineering rationale behind every database, mac
 
 | Category | Chosen Technology | Alternatives Considered | Primary Why / Deciding Factor |
 | :--- | :--- | :--- | :--- |
-| **Vector Database** | **Qdrant** | FAISS, Pinecone, pgvector | Dedicated HNSW graph storage, true multi-process shared memory, and native pre-search keyword payload indexing. |
+| **Vector Database** | **Pinecone** | Qdrant, FAISS, pgvector | Managed shared vector index with metadata filtering; suitable for the hosted API and Kafka worker. |
 | **Embedding Model** | **BAAI/bge-small-en-v1.5** | OpenAI `text-embedding-3`, all-MiniLM-L6-v2 | Zero internet round-trip latency, high MTEB benchmark score on technical terminology, compact 384-dimensional footprint. |
 | **LLM Inference** | **Groq (Llama 3.1 8B)** | OpenAI GPT-4o-mini, Ollama (Local) | Groq's custom LPU hardware delivers >500 tokens/second inference speed, vital for emergency incident response. |
 | **Streaming Engine** | **Redpanda** | Apache Kafka, RabbitMQ | 100% Kafka API compatible, written in C++ (no JVM memory bloat or ZooKeeper complexity), boots instantly in local Docker. |
@@ -21,19 +21,23 @@ This document details the exact engineering rationale behind every database, mac
 
 ---
 
-## 1. Vector Database: Why Qdrant over FAISS, Pinecone, or pgvector?
+## 1. Vector Database: Pinecone as the hosted default
 
-### A. The FAISS Limitation in Multi-Process Architecture
-In our early iterations, we utilized Facebook AI Similarity Search (**FAISS**). While FAISS is incredibly fast for pure algorithmic memory calculations, it is primarily an *in-memory data structure library*, NOT a database server. 
-* **The Problem**: Our FastAPI REST server (handling user queries) and our Kafka Stream Consumer (ingesting events) operate as separate operating system processes. FAISS cannot easily share live updates across process boundaries without complex file-locking schemes or costly RAM reloads from `faiss.index` files every few seconds.
-* **The Qdrant Solution**: Qdrant runs as a standalone network service (`localhost:6333`). Both our ingestion workers and FastAPI servers query it over REST or high-speed gRPC. When the streaming worker commits a new vector, it is immediately queryable by all API nodes without server restarts or filesystem file-locks.
+The app uses a `VectorStore` facade so both the FastAPI process and Kafka consumer
+can use the same hosted index. Pinecone is the configured default; the Qdrant and
+FAISS adapters remain available for alternate/local setups.
 
-### B. Why not Cloud Managed (Pinecone) or Postgres Extensions (pgvector)?
-* **vs Pinecone**: Pinecone mandates internet network round-trips for every vector comparison and requires paid tier cloud lock-in for enterprise features. Qdrant is open-source and deployable anywhere—from local bare-metal Docker environments to massive Kubernetes clusters.
-* **vs pgvector**: While `pgvector` adds vector search to PostgreSQL, standard SQL relational query planners often degrade when handling high-frequency hybrid queries (merging dense HNSW indexes with dynamic text filters). Qdrant was built from the ground up in **Rust** specifically for vector similarity operations.
-
-### C. Secret Weapon: Keyword Payload Indexing
-In RAG, searching vectors first and then throwing out results that belong to the wrong team (post-filtering) causes missing results and skewed relevance. Qdrant supports **Payload Indexing** (`PayloadSchemaType.KEYWORD`), enabling true **Pre-Filtering**. When a DevOps user searches, Qdrant instantly segregates the vector graph using exact keyword matching *before* executing mathematically expensive Cosine Similarity calculations.
+* **Pinecone**: A managed service avoids operating a vector database process or
+  persistent volume alongside the hosted backend and worker. Both app processes use
+  the same index, namespace, and API key. Create an index with the embedding model's
+  configured dimension (`384` by default) and cosine metric.
+* **Qdrant**: Retained as an alternative when the operator wants a self-managed or
+  Qdrant Cloud deployment.
+* **FAISS**: Useful for a single-process local fallback, but separate API and
+  consumer processes need shared persistence coordination.
+* **Metadata filtering**: The Pinecone backend applies team, status, and severity
+  filters in vector queries. The API's role/team authorization remains the primary
+  security boundary; database filters are not a replacement for authorization.
 
 ---
 
@@ -80,6 +84,6 @@ Early LLM applications relied on simple linear pipelines (e.g., `PromptTemplate 
 
 ## 6. Backend & Storage: FastAPI, Supabase, & SQLite
 
-* **FastAPI**: Selected over traditional Python web frameworks (Django/Flask) due to its native design around Python 3 standard asynchronous event loops (`async / await`). By coupling FastAPI with ASGI servers (`uvicorn`), our query routing endpoints process hundreds of concurrent connections without blocking CPU threads during external network I/O calls to Qdrant or Groq.
+* **FastAPI**: Selected over traditional Python web frameworks (Django/Flask) due to its native design around Python 3 standard asynchronous event loops (`async / await`). By coupling FastAPI with ASGI servers (`uvicorn`), our query routing endpoints process concurrent connections while calling the configured vector backend and Groq.
 * **Supabase Authentication**: Delegates complex cryptographic edge logic (password hashing, JSON Web Key Set issuance, token validation expiration algorithms) to specialized identity providers, allowing backend engineers to focus exclusively on business domain logic via cleanly decoupled JWT validation headers.
 * **SQLite for Telemetry**: Rather than overloading our production PostgreSQL identity clusters with high-volume, low-criticality analytical counter operations, we isolate system performance observability into lightweight local ACID-compliant SQLite disk engines. This guarantees zero network overhead when recording microsecond query execution benchmarks and historical traffic charts.

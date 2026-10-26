@@ -50,16 +50,15 @@ Role-Based Access Control dependency factory.
 
 ## 2. Core Business & Storage Services (`rag/core/`)
 
-### A. `core/vector_backends/qdrant_backend.py` (Default Production Backend)
-Implements high-speed vector retrieval and index management over REST and gRPC protocols using Qdrant client library.
-* **Class: `QdrantBackend`**:
-  * `__init__()`: Establishes connections via `config.QDRANT_HOST` and triggers collection assurance routines.
-  * `_ensure_collection()`: Checks if collection (`incidents`) exists. If missing, configures an **HNSW (Hierarchical Navigable Small World)** graph index using 384 dimensions and **Cosine Distance Metric**.
-  * `_ensure_payload_indexes()`: Iterates over critical metadata fields (`team_tag`, `status`, `severity`, `service`) and executes `create_payload_index(..., field_schema=KEYWORD)` to enable instant pre-filtering before cosine distance checks.
-  * `add_document(text: str, metadata: dict | None) -> int`: Calls `EmbeddingModel.encode()`, bundles vector array with document text payload, and commits atomic upsert via `client.upsert(points=[PointStruct(...)])`.
-  * `search(query: str, k: int = 4, team_tag: str | None = None, status: str | None = None, severity: str | None = None) -> list[dict]`: 
-    * *Core Magic*: Constructs Qdrant `Filter` utilizing `FieldCondition` array (e.g. matching exact team and uppercase status). Executes `.query_points(collection_name, query=vec, limit=k, query_filter=query_filter)`. Returns JSON list containing text, cosine similarity score (0.0 to 1.0), and unmasked metadata.
-  * `all_docs() -> dict`: Uses pagination pointer (`client.scroll()`) without loading vector arrays (`with_vectors=False`) to export memory-light textual dictionaries for BM25 sparse evaluations.
+### A. `core/vector_backends/pinecone_backend.py` (Default Shared Backend)
+Implements vector operations against a configured Pinecone index through the Pinecone Python SDK.
+* **Class: `PineconeBackend`**:
+  * `__init__()`: Requires `PINECONE_API_KEY` and `PINECONE_INDEX_NAME`, connects to the index, and verifies its dimension matches `EMBEDDING_DIM`.
+  * `add_document(text: str, metadata: dict | None) -> str`: Embeds text locally, stores a Pinecone vector with flat filterable metadata, and uses the incident ID as its vector ID when available.
+  * `search(query, k, team_tag, status, severity) -> list[dict]`: Embeds the query, applies Pinecone metadata filters, and returns ranked text, cosine scores, and metadata.
+  * `all_docs() -> dict`: Lists vector IDs and fetches their metadata in batches for the process-local BM25 index.
+  * `delete_documents()` and `reset()`: Delete matching vectors or clear only the configured Pinecone namespace.
+* **`core/vector_backends/qdrant_backend.py`** remains available when `VECTOR_BACKEND=qdrant`; FAISS remains a local fallback.
 
 ### B. `core/vector_backends/faiss_backend.py` (Local Fallback Backend)
 Provides entirely standalone memory/disk vector management without Docker dependencies.
@@ -69,12 +68,12 @@ Provides entirely standalone memory/disk vector management without Docker depend
 
 ### C. `core/vector_store.py` & `core/embeddings.py`
 * **`class EmbeddingModel`** (`embeddings.py`): Singleton encapsulation of HuggingFace's `SentenceTransformer("BAAI/bge-small-en-v1.5")`. Enforces device agnostic compilation (CPU optimized, automatically offloading to CUDA if GPU detected).
-* **`class VectorStore`** (`vector_store.py`): Factory router architecture. Dynamically loads `QdrantBackend` or `FaissBackend` based on runtime environmental toggles, shielding high-level LangGraph nodes from database-specific implementation syntax.
+* **`class VectorStore`** (`vector_store.py`): Factory router architecture. Dynamically loads Pinecone, Qdrant, or FAISS based on `VECTOR_BACKEND`, shielding high-level LangGraph nodes from database-specific implementation syntax.
 
 ### D. `core/incidents.py` & `core/correlation.py`
 * **`class IncidentStatus(str, Enum)`**: Validates finite state machines: `OPEN` -> `INVESTIGATING` -> `MITIGATED` -> `RESOLVED` -> `CLOSED`. Prevent forbidden state shifts (e.g., jumping from `CLOSED` directly to `INVESTIGATING` without reopening).
 * **`class IncidentManager`**: CRUD orchestrator operating over SQLAlchemy ORM mapped models (`Incident`, `IncidentTimelineEvent`, `WebNotification`). Handles automated timeline audit trailing on every status change or RCA generation event.
-* **`class IncidentCorrelator`** (`correlation.py`): Evaluates newly submitted alerts against historical records in Qdrant. If cosine similarity exceeds threshold ($\ge 0.85$) and occurs within a short duration window, automatically assigns matching `correlation_group` UUIDs to consolidate redundant alerting firestorms.
+* **`class IncidentCorrelator`** (`correlation.py`): Evaluates newly submitted alerts against historical records through the active vector backend. If cosine similarity exceeds threshold ($\ge 0.85$) and occurs within a short duration window, automatically assigns matching `correlation_group` UUIDs to consolidate redundant alerting firestorms.
 
 ### E. `core/summarizer.py` & `core/notifications.py`
 * **`async def summarize_incident(incident_id: str)`** (`summarizer.py`): Gathers all historical timeline logs and raw telemetry, calls Groq (`llama-3.1-8b-instant`), and populates structured RCA attributes (`summary`, `root_cause`, `impact`, `recommendation`) back into SQLite.
@@ -143,7 +142,7 @@ Instead of linear procedural scripting, execution flows through an explicit, aud
 
 ### A. `jobs/scheduler.py` & `jobs/cleanup.py`
 * **`scheduler.py`**: Initializes background **APScheduler** instance tied directly into FastAPI server lifecycle events.
-* **`cleanup.py`**: Registers recurring midnight cleanup task (`@scheduler.scheduled_job('cron', hour=0)`). Scans relational SQLite incident databases for alerts lingering in `CLOSED` state for over 30 days, archiving rows and purging associated stale Qdrant vector coordinates to maintain optimal vector RAM utilization and search accuracy.
+* **`cleanup.py`**: Registers recurring cleanup tasks. Scans relational SQLite incident records and deletes associated vectors through the active backend.
 
 ### B. `simulation/alert_generator.py`
 * **`class AlertSimulator`**: Provides automated testing harness and demonstration engine. Generates continuous multi-cloud simulated incident scenarios across specialized team domains (e.g., simulating Kubernetes `CrashLoopBackOff` failures, RDS PostgreSQL connection saturation, Kafka broker partition disk exhaustion, and external brute-force login Splunk pattern recognitions).

@@ -43,7 +43,7 @@ graph TD
       AUTH -->|publish live_issues| KAFKA[Redpanda / Kafka]
       KAFKA --> WORKER[stream.consumer]
       WORKER --> EMBED[SentenceTransformer embeddings]
-      EMBED --> QDRANT[(Qdrant or configured FAISS backend)]
+      EMBED --> VECTOR[(Pinecone, Qdrant, or configured FAISS backend)]
     end
 
     subgraph Ask["Question answering"]
@@ -86,7 +86,7 @@ agent coordination, and user-facing request sequence, see
 | AI Orchestration | LangGraph | >= 0.2.0 |
 | LLM Engine | Groq (llama-3.1-8b-instant) | >= 0.13.0 |
 | Embedding Engine | BAAI/bge-small-en-v1.5 (SentenceTransformers) | >= 3.3.0 |
-| Vector DB | **Qdrant** (default) or FAISS (optional fallback) | Compose image: Qdrant v1.12.1 / faiss-cpu |
+| Vector DB | **Pinecone** (default), Qdrant, or FAISS (optional fallback) | Pinecone serverless / Qdrant / faiss-cpu |
 | Lexical Search | rank-bm25 | >= 0.2.2 |
 | Stream Processing| Kafka-python + Redpanda | v24.2+ |
 | Relational Storage | SQLAlchemy + SQLite | >= 2.0.0 |
@@ -112,9 +112,8 @@ During local development and testing, the microservice ecosystem communicates ac
 |---|---|---|---|
 | **React Dashboard** | `5173` | HTTP / WebSocket | Main Frontend UI Command Center (`http://localhost:5173`) |
 | **FastAPI Gateway** | `8000` | HTTP / OpenAPI | Main Backend RAG API Gateway (`http://localhost:8000/docs`) |
-| **Qdrant Vector DB** | `6333` | HTTP / REST | Vector database HNSW indexing & semantic hybrid point queries |
-| **Qdrant Vector DB** | `6334` | gRPC | High-performance internal binary vector stream RPC communication |
-| **Qdrant Dashboard** | `6333` | HTTP / Web UI | Built-in Visual DB Management UI (`http://localhost:6333/dashboard`) |
+| **Pinecone** | Cloud endpoint | HTTPS | Managed vector search and metadata-filtered semantic queries |
+| **Qdrant (optional)** | `6333` / `6334` | HTTP / gRPC | Optional local or hosted vector backend |
 | **Redpanda Broker** | `9092` | Kafka Protocol | Event pub/sub topic streaming broker (`live_issues`) |
 | **SQLite DB** | *Local File* | ACID DB Engine | Embedded local transactional database (`rag/rag_analytics.db`) |
 
@@ -128,7 +127,7 @@ rag/
 |-- app/                  # FastAPI routes, authentication, and role/team access checks
 |-- core/                 # Incidents, analytics, embeddings, guardrails, notifications,
 |                         # correlation, summarization, and VectorStore facade
-|   `-- vector_backends/  # Qdrant (default) and optional FAISS implementation
+|   `-- vector_backends/  # Pinecone (default), Qdrant, and optional FAISS
 |-- retrieval/            # Dense retrieval, cached BM25, reciprocal-rank fusion,
 |                         # recency weighting, and lexical overlap reranking
 |-- stream/               # Kafka producer and vector-index consumer
@@ -140,7 +139,7 @@ rag/
 |-- scripts/               # Index migration utilities
 |-- tests/                 # Backend tests
 |-- config.py              # Environment-backed model, backend, RBAC, and retention config
-|-- docker-compose.yaml    # Local Redpanda and Qdrant services
+|-- docker-compose.yaml    # Local Redpanda and optional Qdrant services
 |-- requirements.txt       # Python backend dependencies
 ```
 
@@ -150,8 +149,8 @@ rag/
   incident lifecycle records, timeline events, web notifications, and query/issue
   analytics. Supabase Auth and the `profiles` table supply user identity, role, and
   team information.
-- **Qdrant** stores incident text as vector points with metadata used for filtering.
-  It is the default shared vector backend; **FAISS** is an optional local fallback.
+- **Pinecone** stores incident text as vectors with metadata used for filtering. It is
+  the default shared vector backend; **Qdrant** and **FAISS** remain alternatives.
 - **Redpanda/Kafka** carries `live_issues` events from the API process to the separate
   `stream.consumer` process, which embeds and indexes incident text. Indexing is
   therefore asynchronous relative to publication. If the broker is unavailable, the
@@ -334,11 +333,11 @@ SUPABASE_URL=your_supabase_url
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 SUPABASE_JWT_SECRET=your_jwt_secret
 
-# Vector Database (Qdrant is configured as production default)
-VECTOR_BACKEND=qdrant
-QDRANT_HOST=localhost
-QDRANT_PORT=6333
-QDRANT_COLLECTION=incidents
+# Vector Database (Pinecone is the default shared backend)
+VECTOR_BACKEND=pinecone
+PINECONE_API_KEY=your_pinecone_api_key
+PINECONE_INDEX_NAME=incident-intelligence
+PINECONE_NAMESPACE=incidents
 
 # Embedding Engine Hyperparameters
 EMBEDDING_MODEL=BAAI/bge-small-en-v1.5
@@ -385,11 +384,21 @@ cd frontend
 npm install
 ```
 
-### 2. Boot Docker Infrastructure
+### 2. Boot local infrastructure
 ```bash
 cd rag
-docker compose up -d           # Launches Qdrant (6333) + Redpanda Kafka (9092)
+docker compose up -d redpanda  # Pinecone is cloud-hosted; Redpanda may also be cloud-hosted
 ```
+
+Create a Pinecone serverless index before starting the app. It must use the configured
+embedding dimension (`384` by default) and the `cosine` metric. Set the same Pinecone
+API key, index name, and namespace for both the FastAPI process and Kafka consumer.
+For local-only testing without Pinecone, set `VECTOR_BACKEND=qdrant` and start Qdrant
+with `docker compose up -d qdrant`.
+Existing Qdrant vectors are not copied automatically. To retain a local Qdrant
+collection, configure both backends' environment values and run
+`python -m scripts.migrate_qdrant_to_pinecone` before switching the normal runtime
+to Pinecone.
 
 ### 3. Launch Application Microservices
 Open three separate terminal sessions inside your `rag` workspace directory:
@@ -408,39 +417,10 @@ cd rag/frontend
 npm run dev
 ```
 
-Open your browser to **http://localhost:5173**.
-To inspect your vector database visually, open the **Qdrant Built-in UI at http://localhost:6333/dashboard**.
+Open your browser to **http://localhost:5173**. Inspect the hosted index and vector
+count in the Pinecone console. The optional local Qdrant UI is at
+`http://localhost:6333/dashboard`.
 
----
-
-## Qdrant Production Setup vs FAISS Fallback
-
-This repository utilizes **Qdrant Vector Database by default** due to enterprise multi-process concurrency requirements, zero-lock shared memory capabilities, and high-speed payload pre-filtering. FAISS code remains in the repository solely as a standalone CPU fallback option.
-
-### Why Qdrant Overpowers FAISS In This Architecture
-- **True Multi-Process Memory Access**: Both FastAPI (`main.py`) and our Kafka worker (`consumer.py`) query the same remote Qdrant service without file lock collisions or redundant filesystem index reloads.
-- **Native Keyword Pre-Filtering**: Evaluates structured metadata fields (`team_tag`, `status`, `severity`) *before* running Cosine Similarity calculations.
-- **Persistent Docker Volume Preservation**: Vector graph storage is safely persisted across server reboots via `qdrant_data`.
-
-### Verification Commands
-```bash
-# Verify container execution status
-docker ps | findstr qdrant
-
-# Query Qdrant collections directly via HTTP REST
-curl http://localhost:6333/collections
-
-# Ping Application Admin Endpoint
-curl http://localhost:8000/admin/vector-status
-# Returns: { "backend": "qdrant", "document_count": N }
-```
-
-### One-Time FAISS Data Migration
-If you possess legacy historical JSON archives inside `data/docs.json`, migrate them straight into Qdrant using our migration script:
-```bash
-cd rag
-python -m scripts.migrate_faiss_to_qdrant
-```
 
 ---
 
@@ -455,6 +435,4 @@ Manual cleanup triggering can be forced by an administrator via `POST /admin/cle
 
 ---
 
-## Qdrant has a built-in web dashboard. Open this in your browser:
-
-http://localhost:6333/dashboard
+Pinecone index operations and vector counts can be inspected in the Pinecone console.

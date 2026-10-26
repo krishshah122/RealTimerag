@@ -1,6 +1,5 @@
 """Qdrant vector backend — default production store."""
 
-from qdrant_client import QdrantClient
 from qdrant_client.models import (
     Distance,
     FieldCondition,
@@ -11,8 +10,9 @@ from qdrant_client.models import (
     VectorParams,
 )
 
-from config import EMBEDDING_DIM, QDRANT_COLLECTION, QDRANT_HOST, QDRANT_PORT
+from config import EMBEDDING_DIM, QDRANT_COLLECTION
 from core.embeddings import EmbeddingModel
+from core.qdrant_connection import create_qdrant_client
 
 # Payload fields used for metadata filtering
 INDEXED_PAYLOAD_FIELDS = ("team_tag", "issue_id", "status", "severity", "service")
@@ -20,7 +20,7 @@ INDEXED_PAYLOAD_FIELDS = ("team_tag", "issue_id", "status", "severity", "service
 
 class QdrantBackend:
     def __init__(self):
-        self.client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT, check_compatibility=False)
+        self.client = create_qdrant_client()
         self.collection = QDRANT_COLLECTION
         self._ensure_collection()
         self._doc_counter = self._max_id() + 1

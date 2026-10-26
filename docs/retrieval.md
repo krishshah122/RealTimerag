@@ -34,7 +34,7 @@ flowchart LR
         AUTH -->|publish live_issues| BUS[Redpanda / Kafka]
         BUS --> CONSUMER[stream.consumer]
         CONSUMER --> EMBED[SentenceTransformer]
-        EMBED --> INDEX[(Qdrant or FAISS)]
+        EMBED --> INDEX[(Pinecone, Qdrant, or FAISS)]
     end
 
     subgraph Read["Read path: user question"]
@@ -153,7 +153,7 @@ the answer string at the API boundary.
 2. **Secret sanitization:** redact configured credentials from the accepted query
    before searching and from incident context before LLM calls.
 3. **Dense search:** `DenseRetriever` delegates to `VectorStore.search()` for up to
-   eight candidates. Qdrant can apply team, status, and severity payload filters
+   eight candidates. Pinecone can apply team, status, and severity metadata filters
    during vector search; the retrieval node also applies team/status/severity and
    recency checks to dense results.
 4. **Sparse search:** get a cached `rank-bm25` index from
@@ -237,7 +237,7 @@ sequenceDiagram
     participant LLM as Groq summarizer
     participant Broker as Redpanda topic live_issues
     participant Worker as stream.consumer
-    participant Store as Qdrant / FAISS
+    participant Store as Pinecone / Qdrant / FAISS
 
     Client->>API: Authenticated incident text and metadata
     API->>DB: Create incident and created timeline event
@@ -287,7 +287,8 @@ multi-agent LLM branches.
 | `retrieval/recency.py` | Severity-specific recency window and ranking adjustment. |
 | `retrieval/rerank.py` | Query/document token-overlap reranking. |
 | `core/vector_store.py` | Backend facade, write revision tracking, and search delegation. |
-| `core/vector_backends/qdrant_backend.py` | Qdrant collection, embedding, metadata filters, and vector operations. |
+| `core/vector_backends/pinecone_backend.py` | Pinecone index, embedding, metadata filters, and vector operations (default). |
+| `core/vector_backends/qdrant_backend.py` | Optional Qdrant collection, embedding, metadata filters, and vector operations. |
 | `core/embeddings.py` | SentenceTransformer model loading and encoding. |
 | `core/guardrails.py` | Query gate, secret redaction, and grounded-context check. |
 | `core/summarizer.py` | Ingestion summaries, RCA generation, and recommendation generation. |
@@ -298,8 +299,9 @@ multi-agent LLM branches.
 | Setting | Default | Effect |
 |---|---|---|
 | `RAG_MULTI_AGENT_ENABLED` | `true` | Select multi-agent specialist/synthesis or single `answer` for `/ask`. |
-| `VECTOR_BACKEND` | `qdrant` | Select Qdrant or optional FAISS backend. |
-| `QDRANT_HOST`, `QDRANT_PORT`, `QDRANT_COLLECTION` | `localhost`, `6333`, `incidents` | Configure the Qdrant service and collection. |
+| `VECTOR_BACKEND` | `pinecone` | Select Pinecone, optional Qdrant, or local FAISS backend. |
+| `PINECONE_API_KEY`, `PINECONE_INDEX_NAME`, `PINECONE_NAMESPACE` | —, —, `incidents` | Configure the Pinecone connection and namespace. |
+| `QDRANT_HOST`, `QDRANT_PORT`, `QDRANT_COLLECTION` | `localhost`, `6333`, `incidents` | Configure Qdrant when `VECTOR_BACKEND=qdrant`. |
 | `EMBEDDING_MODEL`, `EMBEDDING_DIM` | `BAAI/bge-small-en-v1.5`, `384` | Embedding model and expected vector size. |
 | `LLM_MODEL` | `llama-3.1-8b-instant` | Groq model used by graph and incident-generation helpers. |
 | `RECENCY_CRITICAL_DAYS`, `RECENCY_HIGH_DAYS`, `RECENCY_MEDIUM_DAYS`, `RECENCY_NORMAL_DAYS`, `RECENCY_LOW_DAYS` | `90`, `60`, `30`, `30`, `30` | Candidate recency windows. |
