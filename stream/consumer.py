@@ -9,12 +9,13 @@ store = VectorStore()
 consumer = KafkaConsumer(
     "live_issues",
     **get_kafka_config(),
+    group_id="incident-vector-indexer",
     value_deserializer=lambda m: json.loads(m.decode("utf-8")),
-    auto_offset_reset="latest",
-    enable_auto_commit=True,
+    auto_offset_reset="earliest",
+    enable_auto_commit=False,
 )
 
-print("Kafka consumer started...")
+print("Kafka consumer started (group=incident-vector-indexer)...")
 
 for message in consumer:
     event = message.value
@@ -36,3 +37,4 @@ for message in consumer:
         f"Stored in {store.backend_name.capitalize()} "
         f"({len(metadata)} metadata fields)"
     )
+    consumer.commit()

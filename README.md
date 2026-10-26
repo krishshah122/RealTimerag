@@ -426,6 +426,12 @@ Open your browser to **http://localhost:5173**. Inspect the hosted index and vec
 count in the Pinecone console. The optional local Qdrant UI is at
 `http://localhost:6333/dashboard`.
 
+The consumer connects outbound to the configured Kafka/Redpanda broker and polls
+`live_issues`; Redpanda does not call the consumer through a webhook. It uses the
+stable `incident-vector-indexer` consumer group and commits each offset only after
+the vector write succeeds. On first start, `earliest` lets it process messages still
+retained in the topic; later restarts resume from the committed group offset.
+
 
 ---
 

@@ -75,6 +75,39 @@ graph TD
 
 ## 2. Component Design & Decoupled Architecture
 
+### Runtime deployment mapping
+
+For the hosted setup, the React frontend can be served by Vercel, the FastAPI API
+by Render, Kafka-compatible Redpanda and Pinecone remain managed cloud services,
+and `stream.consumer` runs as a separate process. The incident path is:
+
+```text
+User browser -> Vercel frontend -> Render FastAPI -> Redpanda Cloud
+                                                   -> consumer process -> Pinecone
+```
+
+The API publishes to Redpanda; it does not write the vector directly. The consumer
+initiates an outbound Kafka connection and polls the `live_issues` topic. Redpanda
+does not invoke the consumer through a webhook, and the consumer does not require
+an inbound public port.
+
+There are two ways to host that consumer:
+
+* **Always-on cloud worker:** deploy `python -m stream.consumer` as a background
+  worker on a host that supports continuously running processes. This keeps the
+  entire ingestion pipeline cloud-hosted; worker availability and cost depend on
+  the provider plan.
+* **Free/demo local worker:** run `python -m stream.consumer` on a developer
+  computer. It still consumes from cloud Redpanda and writes to cloud Pinecone, but
+  indexing pauses while that computer or process is offline. This is not a fully
+  cloud-hosted or always-on deployment. The current consumer uses the stable
+  `incident-vector-indexer` group, starts at the earliest retained message on its
+  first run, and commits offsets only after successful vector writes.
+
+Render Free web services may sleep when idle, and model inference can require
+substantially more memory than API startup. Validate the chosen host's memory,
+uptime, and persistence limits before treating a demo setup as production-ready.
+
 ### Why Decouple Ingestion from Querying?
 In high-throughput operational environments (e.g., thousands of microservices emitting alerts and APM metrics), locking a vector database during synchronous REST calls would cause massive API degradation and timeout cascades.
 

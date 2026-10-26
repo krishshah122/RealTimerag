@@ -13,9 +13,11 @@ The platform has two separate pipelines:
 2. **Question answering:** authenticate and authorize a user, retrieve a small set
    of team-scoped incident texts, route through LangGraph, and return an answer.
 
-LangGraph handles the second pipeline only. Incident ingestion, resolution
-recommendations, correlation, notifications, and scheduled cleanup use ordinary
-FastAPI/service calls rather than graph nodes.
+LangGraph handles the question-answering and retrieval-based summarization pipeline
+only. The incident write path (`POST /log_issue` -> Redpanda -> `stream.consumer` ->
+Pinecone by default) is a separate service flow, not a graph run. Incident creation,
+resolution recommendations, correlation, notifications, and scheduled cleanup use
+ordinary FastAPI/service calls rather than these LangGraph nodes.
 
 ## End-to-end system diagram
 
@@ -78,9 +80,50 @@ module initializes. The graph is then reused; its state is not.
 | `no_context` | Return a groundedness response when retrieval returned no documents. No LLM call is made. | `answer` |
 | `incident_analyst` | In multi-agent `/ask`, identify evidence about matching incidents, status, severity, recency, root cause, and impact. | `incident_analysis` |
 | `remediation_analyst` | In multi-agent `/ask`, identify historical remediation evidence and distinguish it from cautious recommendations. | `remediation_analysis` |
-| `synthesize` | Combine the two specialist notes into one response, using only those notes. | `answer` |
+| `synthesize` | Combine the two specialist notes into one response, using only those notes and stating gaps or conflicts. | `answer` |
 | `answer` | In single-agent `/ask`, write the direct response grounded in retrieved incident text. | `answer` |
 | `summarize` | Produce an executive summary, root-cause patterns, impact assessment, and recommended remediation from retrieved text. | `answer` |
+
+### What each node does and why
+
+* **`retrieve` is the shared evidence gate.** It checks the question, sanitizes
+  sensitive text, retrieves team-scoped dense and BM25 candidates, applies the
+  requested filters and recency rules, fuses/reranks results, and passes up to three
+  incident texts forward. Keeping this work before generation means every response
+  path uses the same evidence and guardrails.
+* **`blocked` is the safety exit.** It returns the guardrail reason as the answer.
+  It is separate from `no_context`: unsafe/rejected input should explain the
+  rejection, not say the historical search was empty. It does not call Groq.
+* **`no_context` is the evidence-missing exit.** It returns a groundedness message
+  when retrieval produced no usable incident text. It avoids asking an LLM to invent
+  an answer without evidence and does not call Groq.
+* **`answer` is the concise single-agent path.** One model call receives the query
+  and retrieved context and returns a direct grounded response. Use this when lower
+  latency and fewer model calls matter more than separating analysis roles.
+* **`incident_analyst` and `remediation_analyst` are independent parallel
+  specialists.** Both receive the same retrieved documents and question. The first
+  extracts incident facts (severity, status, timing, root cause, impact); the second
+  focuses on evidenced actions and distinguishes recorded remediation from
+  recommendations. They do not message each other or search independently.
+* **`synthesize` is the multi-agent join.** It reads both specialist results from
+  `RAGState`, reconciles gaps or conflicts, and writes the final answer. This
+  role-separated route costs more latency and model calls but makes the analysis
+  dimensions explicit.
+* **`summarize` is a different request mode, not a specialist in `/ask`.** It uses
+  the same retrieval step, then makes one generation call for an executive summary,
+  root-cause patterns, impact, and remediation. It bypasses the parallel specialist
+  fan-out because the request asks for a structured summary rather than an answer
+  assembled from separate analyst perspectives.
+
+### Route differences at a glance
+
+| Request/result | Route after `retrieve` | Generation calls | Why choose it |
+|---|---|---:|---|
+| Unsafe input | `blocked` | 0 | Explain the guardrail rejection without retrieval-backed generation. |
+| No usable retrieved docs | `no_context` | 0 | Avoid an ungrounded model answer and unnecessary token use. |
+| `/ask`, `RAG_MULTI_AGENT_ENABLED=false` | `answer` | 1 | Faster and simpler direct grounded response. |
+| `/ask`, `RAG_MULTI_AGENT_ENABLED=true` | `incident_analyst` + `remediation_analyst` in parallel, then `synthesize` | 3 | Explicitly separate incident evidence from remediation evidence before composing. |
+| `/summarize` with retrieved docs | `summarize` | 1 | Produce a structured overview rather than a question-specific response. |
 
 The graph structure and routing are:
 
