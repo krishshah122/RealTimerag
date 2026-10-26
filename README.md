@@ -25,41 +25,55 @@ Unlike traditional RAG systems that rely on static documents, this platform cont
 | RBAC | Admin, Team Lead, SRE, Engineer, and Analyst roles |
 | Analytics | MTTR, severity distribution, top services, trends |
 | Auto cleanup | Background job archives and purges expired incidents |
-| Alert generator | Simulates 500+ realistic monitoring alerts |
+| Alert generator | Generates synthetic monitoring alerts for demos and testing |
 
 ---
 
-## Architecture Flow
+## End-to-End Architecture
 
 ```mermaid
 graph TD
-    A[Alert Generator / Simulation / Client] -->|POST /log_issue| B(FastAPI Gateway)
-    B -->|Persist Lifecycle| C[(Incident DB - SQLite)]
-    B -->|Groq Inference| D[Summarization Agent]
-    B -->|Group Similar| E[Correlation Engine]
-    B -->|Dispatch Alerts| F[Notification Service]
-    B -->|Publish Event| G[Kafka / Redpanda: live_issues]
-    
-    G -->|Consume| H[stream/consumer.py Worker]
-    H -->|Encode 384-dim| I[BGE Embeddings Engine]
-    I -->|Upsert Point| J[(Qdrant Vector DB)]
+    subgraph Ingest["Incident ingestion and indexing"]
+      A[Monitoring client or simulation] -->|POST /log_issue| API[FastAPI]
+      API --> AUTH[JWT and team authorization]
+      AUTH --> SQL[(SQLite: incidents, timeline, analytics, notifications)]
+      AUTH --> CORR[Correlation group assignment]
+      AUTH --> SUM[Incident summary via Groq]
+      AUTH --> NOTIFY[Web notification and optional channels]
+      AUTH -->|publish live_issues| KAFKA[Redpanda / Kafka]
+      KAFKA --> WORKER[stream.consumer]
+      WORKER --> EMBED[SentenceTransformer embeddings]
+      EMBED --> QDRANT[(Qdrant or configured FAISS backend)]
+    end
 
-    K[Authenticated Analyst / SRE] -->|Query /ask| L(React Dashboard UI)
-    L -->|Execute RAG| M[LangGraph Orchestration]
-    M -->|Dense Query| J
-    M -->|Sparse Query| N[BM25 Lexical Index]
-    M -->|RRF + Recency Decay + Overlap Reranking| O[Top 3 Grounded Context Docs]
-    O --> Q{LangGraph route}
-    Q -->|ask: parallel| R[Incident Analyst]
-    Q -->|ask: parallel| S[Remediation Analyst]
-    Q -->|single agent when disabled| P
-    R --> T[Grounded Synthesis]
-    S --> T
-    Q -->|summarize| U[Incident Summarizer]
-    T --> P[Groq LLM: Llama 3.1 8B]
-    U --> P
-    P -->|Return AI Intelligence| L
+    subgraph Ask["Question answering"]
+      USER[Analyst in React dashboard] -->|POST /ask| API2[FastAPI auth and team access]
+      API2 --> STATE[Per-request LangGraph RAGState]
+      STATE --> RETRIEVE[retrieve: guardrail and hybrid retrieval]
+      RETRIEVE -->|dense top 8| QDRANT
+      RETRIEVE -->|sparse top 8| BM25[Cached team-scoped BM25 index]
+      RETRIEVE --> FUSE[RRF fusion, recency boost, lexical overlap rerank]
+      FUSE --> ROUTE{Blocked, no docs, or route?}
+      ROUTE -->|blocked| BLOCK[blocked: return guardrail reason]
+      ROUTE -->|no docs| EMPTY[no_context: groundedness response]
+      ROUTE -->|ask, multi-agent on| IA[incident_analyst]
+      ROUTE -->|ask, multi-agent on| RA[remediation_analyst]
+      IA --> SYNTH[synthesize specialist notes]
+      RA --> SYNTH
+      ROUTE -->|ask, multi-agent off| ANSWER[answer: single grounded LLM call]
+      ROUTE -->|summarize mode| SUMGRAPH[summarize: incident summary]
+      SYNTH --> RESULT[Graph state response with answer]
+      ANSWER --> RESULT
+      SUMGRAPH --> RESULT
+      BLOCK --> RESULT
+      EMPTY --> RESULT
+      RESULT -->|JSON state| USER
+    end
 ```
+
+For the exact LangGraph node/edge map, retrieval scoring details, request state,
+agent coordination, and user-facing request sequence, see
+[docs/retrieval.md](./docs/retrieval.md).
 
 ---
 
@@ -72,7 +86,7 @@ graph TD
 | AI Orchestration | LangGraph | >= 0.2.0 |
 | LLM Engine | Groq (llama-3.1-8b-instant) | >= 0.13.0 |
 | Embedding Engine | BAAI/bge-small-en-v1.5 (SentenceTransformers) | >= 3.3.0 |
-| Vector DB | **Qdrant** (default) or FAISS (optional fallback) | Qdrant v1.18+ / faiss-cpu |
+| Vector DB | **Qdrant** (default) or FAISS (optional fallback) | Compose image: Qdrant v1.12.1 / faiss-cpu |
 | Lexical Search | rank-bm25 | >= 0.2.2 |
 | Stream Processing| Kafka-python + Redpanda | v24.2+ |
 | Relational Storage | SQLAlchemy + SQLite | >= 2.0.0 |
@@ -110,22 +124,41 @@ During local development and testing, the microservice ecosystem communicates ac
 
 ```text
 rag/
-+-- agents/              # LangGraph pipeline (retrieve, answer, summarize)
-+-- app/                 # FastAPI routes (auth, issues, incidents, analytics, admin)
-+-- core/                # Vector store, incidents, notifications, correlation, summarizer
-|   +-- vector_backends/ # Qdrant (default) + FAISS (fallback)
-+-- retrieval/           # Dense, BM25, RRF, rerank, recency
-+-- stream/              # Kafka producer + consumer
-+-- simulation/          # Alert generator
-+-- jobs/                # Background cleanup scheduler
-+-- frontend/            # React SPA Dashboard
-+-- docs/                # Comprehensive Interview Prep Deep-Dive documentation suite
-+-- data/                # FAISS files only when VECTOR_BACKEND=faiss
-+-- scripts/             # Migration utilities (migrate_faiss_to_qdrant.py)
-+-- docker-compose.yaml  # Redpanda + Qdrant container configurations
-+-- config.py            # Global system hyper-parameters and environment getters
-+-- requirements.txt     # Python backend package dependencies
+|-- agents/               # LangGraph state, nodes, and ask/summarize graph builders
+|-- app/                  # FastAPI routes, authentication, and role/team access checks
+|-- core/                 # Incidents, analytics, embeddings, guardrails, notifications,
+|                         # correlation, summarization, and VectorStore facade
+|   `-- vector_backends/  # Qdrant (default) and optional FAISS implementation
+|-- retrieval/            # Dense retrieval, cached BM25, reciprocal-rank fusion,
+|                         # recency weighting, and lexical overlap reranking
+|-- stream/               # Kafka producer and vector-index consumer
+|-- simulation/            # Synthetic alert generation for demos/testing
+|-- jobs/                  # APScheduler startup and retention cleanup
+|-- frontend/              # React/Vite dashboard and API client
+|-- docs/                  # Architecture, module, stack, interview, and retrieval docs
+|-- data/                  # Local FAISS index/documents when the FAISS backend is used
+|-- scripts/               # Index migration utilities
+|-- tests/                 # Backend tests
+|-- config.py              # Environment-backed model, backend, RBAC, and retention config
+|-- docker-compose.yaml    # Local Redpanda and Qdrant services
+|-- requirements.txt       # Python backend dependencies
 ```
+
+### Data ownership and persistence
+
+- **SQLite** (`rag_analytics.db`, relative to the backend working directory) stores
+  incident lifecycle records, timeline events, web notifications, and query/issue
+  analytics. Supabase Auth and the `profiles` table supply user identity, role, and
+  team information.
+- **Qdrant** stores incident text as vector points with metadata used for filtering.
+  It is the default shared vector backend; **FAISS** is an optional local fallback.
+- **Redpanda/Kafka** carries `live_issues` events from the API process to the separate
+  `stream.consumer` process, which embeds and indexes incident text. Indexing is
+  therefore asynchronous relative to publication. If the broker is unavailable, the
+  producer logs and skips publication; the SQLite incident record may still exist.
+- **LangGraph state is request-scoped**. It is initialized for each `/ask` or
+  `/summarize` request, merged from node result dictionaries during that graph run,
+  and is not a persistent conversation history or cross-request memory store.
 
 ---
 
@@ -158,15 +191,21 @@ rag/
 
 #### LangGraph workflow
 
-`/ask` retrieves evidence once, then LangGraph fans out to two async specialist nodes
-(incident analysis and remediation analysis) in parallel. A synthesis node combines
-their evidence-bound notes into the response. `/summarize` keeps a single summarizer
-path, and blocked or empty retrieval results bypass all LLM calls. Set
-`RAG_MULTI_AGENT_ENABLED=false` to return `/ask` to the lower-cost single-answer-node
-workflow. Both compiled workflows are reused across requests. The parallel mode makes
-three LLM calls per successful `/ask` (two specialists plus synthesis), trading token
-cost for role separation; tune specialist output limits and evaluate answer quality and
-latency against representative queries before rollout.
+`/ask` and `/summarize` use compiled LangGraph workflows created once by the FastAPI
+application. Each request supplies a fresh state. Retrieval happens once; in
+multi-agent `/ask` mode, the incident and remediation specialists receive the same
+retrieved evidence and run as parallel branches. They do not message each other
+directly: each writes its own analysis field, and the synthesis node reads both fields
+to produce the answer. In single-agent mode, `answer` generates the answer directly.
+`/summarize` uses the `summarize` node, not the two-specialist path. Blocked inputs
+and empty retrieval results short-circuit before generation. Set
+`RAG_MULTI_AGENT_ENABLED=false` to select the single-answer-node `/ask` path.
+
+Successful multi-agent `/ask` normally makes three Groq calls (two specialists and
+one synthesis); single-agent `/ask` and `/summarize` each make one. These paths
+therefore trade token usage and latency for separation of analysis and remediation
+roles. The graph is orchestration, not an autonomous agent-to-agent conversation:
+branches communicate through the shared LangGraph state only.
 
 The BM25 corpus/index is cached per process, invalidated by writes made through
 `VectorStore`, and refreshed at least every 30 seconds to observe updates from other
@@ -229,15 +268,28 @@ removes the corpus-scan cost.
 
 ---
 
-## Time-Aware Hybrid Retrieval Math
+## Hybrid Retrieval and Recency
 
-When an analyst initiates an AI interrogation, candidate incident documents are scored across three complementary scoring methodologies:
+The current implementation retrieves up to eight dense candidates and eight BM25
+candidates, filters them by team/status/severity and severity-specific recency windows,
+then combines the ranked lists with Reciprocal Rank Fusion (`k=60`). It adds a
+normalized recency contribution and applies a final lexical-overlap rerank. This is
+not a direct weighted sum of raw cosine similarity and BM25 scores:
 
 ```text
-Final Score = (0.5 * Semantic Cosine Similarity) + (0.3 * BM25 TF-IDF Keyword Rank) + (0.2 * Temporal Recency Decay Weight)
+RRF(document) = sum(1 / (60 + rank)) across the dense and sparse result lists
+recency_score = exp(-0.693 * age_days / max(window_days / 3, 1))
+pre-rerank = 0.8 * normalized_RRF + 0.2 * recency_score
+rerank = 0.7 * pre-rerank + 0.3 * query-term overlap ratio
 ```
 
-**Default Temporal Recency Expiry Windows (`config.py`):**
+The retriever passes the top three document texts (not the full metadata records) into
+the answer or summarization node. Missing timestamps receive the recency helper's
+default score and are not rejected by the recency-window filter. BM25 uses the
+`rank-bm25` implementation over whitespace-tokenized incident text; its per-process
+index is rebuilt after local vector-store writes or when the refresh interval expires.
+
+**Default maximum recency windows (`config.py`):**
 | Severity Level | Expiration Tolerance Window |
 |---|---|
 | Critical | 90 Days |
@@ -291,6 +343,10 @@ QDRANT_COLLECTION=incidents
 # Embedding Engine Hyperparameters
 EMBEDDING_MODEL=BAAI/bge-small-en-v1.5
 EMBEDDING_DIM=384
+
+# LangGraph / model
+RAG_MULTI_AGENT_ENABLED=true
+LLM_MODEL=llama-3.1-8b-instant
 
 # Optional Alert Notification Dispatch Channels
 SLACK_WEBHOOK_URL=
