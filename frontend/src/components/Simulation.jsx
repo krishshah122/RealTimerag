@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../supabaseClient";
-import { generateAlerts } from "../api";
+import { API_BASE, generateAlerts } from "../api";
 
 export default function Simulation() {
     const [logs, setLogs] = useState([]);
@@ -94,7 +94,7 @@ export default function Simulation() {
                 throw new Error("You must be logged in to trigger simulations.");
             }
 
-            const response = await fetch("http://localhost:8000/log_issue", {
+            const response = await fetch(`${API_BASE}/log_issue`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",

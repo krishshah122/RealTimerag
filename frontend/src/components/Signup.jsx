@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { supabase } from "../supabaseClient";
+import { API_BASE } from "../api";
 import { useNavigate, Link } from "react-router-dom";
 
 export default function Signup() {
@@ -20,7 +21,7 @@ export default function Signup() {
 
         try {
             // Call our backend /register endpoint
-            const response = await fetch("http://localhost:8000/register", {
+            const response = await fetch(`${API_BASE}/register`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",

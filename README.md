@@ -365,7 +365,12 @@ LANGCHAIN_API_KEY=your_langchain_api_key
 ```env
 VITE_SUPABASE_URL=your_supabase_url
 VITE_SUPABASE_ANON_KEY=your_anon_key
+VITE_API_URL=http://127.0.0.1:8000
 ```
+
+For Vercel, set `VITE_API_URL` to the public Render API URL when configuring the
+frontend environment. On Render, set `CORS_ORIGINS` to the deployed Vercel origin
+(for example, `https://your-app.vercel.app`); multiple origins can be comma-separated.
 
 ---
 
