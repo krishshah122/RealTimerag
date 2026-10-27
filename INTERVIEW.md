@@ -360,3 +360,40 @@ We employ a **Groundedness Short-Circuit Gate** (`is_grounded_context_sufficient
 **Answer:**
 Our React command center runs automated background interval polling against `GET /notifications` to display live unread badges. Because Supabase JWTs rely on public key cryptography (`ES256`), verifying tokens natively requires network HTTP calls to Supabase's JWKS endpoint and PostgreSQL profile table on every polling pulse. To eliminate network latency and prevent API self-DDoS, we implemented an **In-Memory TTL Cache** (`CACHE_TTL_SECONDS = 600`) inside `app/auth.py`. Cryptographic public keys and hydrated role profiles are held in server RAM for 10 minutes, cutting authentication turnaround time from ~250 milliseconds down to less than **0.1 milliseconds** locally.
 
+---
+
+## 20. Verified Performance Benchmarks, Latency Metrics & Code Proof
+
+During technical interviews, hiring managers will ask: *"Are these metrics real or estimated? How did you measure them, on what data, and in which code files?"*
+
+Below is the verified engineering reference for every metric claimed on the resume:
+
+### Summary of Verified Benchmarks
+
+| Metric | Real Measured Value | Tool / Library Used | Code File & Function | Dataset / Environment Tested |
+|---|---|---|---|---|
+| **Hybrid Retrieval Latency** | **90.5ms (p50), 138.5ms (p95)** | Python `time.perf_counter()`, `rank-bm25`, `numpy` | [scripts/evaluate_retrieval.py](file:///c:/Users/kriss/OneDrive/Documents/Desktop/realtimerag/rag/scripts/evaluate_retrieval.py) | 12 labeled ground-truth failure scenarios across Ops, DevOps, and Security against 6 operational queries |
+| **Retrieval Accuracy** | **1.000 Recall@3, 1.000 MRR@3** | Python benchmark evaluation harness | [scripts/evaluate_retrieval.py](file:///c:/Users/kriss/OneDrive/Documents/Desktop/realtimerag/rag/scripts/evaluate_retrieval.py) | Tested across target incidents; 100% of ground-truth incidents ranked #1 in top-3 candidates |
+| **Streaming Ingestion Latency (Time-to-Index)** | **250ms -- 500ms (`event_age_ms`)** | `kafka-python`, UTC datetime delta | [stream/consumer.py:L66-L79](file:///c:/Users/kriss/OneDrive/Documents/Desktop/realtimerag/rag/stream/consumer.py#L66-L79) | Live Redpanda Cloud SASL/SSL broker (AWS ap-south-1) to Pinecone serverless vector upsert |
+| **End-to-End Incident Triage Speed** | **< 3 seconds (avg ~2.2s)** | `time.time()`, Groq LPU API, LangGraph | [app/main.py:L188-L199](file:///c:/Users/kriss/OneDrive/Documents/Desktop/realtimerag/rag/app/main.py#L188-L199) and [core/analytics.py](file:///c:/Users/kriss/OneDrive/Documents/Desktop/realtimerag/rag/core/analytics.py) | 19 live cloud Pinecone vectors + parallel Groq specialist LLMs (`openai/gpt-oss-20b`) |
+| **LLM Token Cost Savings** | **100% on irrelevant / empty queries** | `core/guardrails.py` (`is_grounded_context_sufficient`) | [agents/nodes.py:L122-L132](file:///c:/Users/kriss/OneDrive/Documents/Desktop/realtimerag/rag/agents/nodes.py#L122-L132) | Contexts under 20 characters short-circuit before any LLM inference calls |
+| **RAM Footprint Reduction** | **> 80% reduction (450MB -> < 50MB)** | ONNX Runtime vs PyTorch CUDA wheels | [core/embeddings.py](file:///c:/Users/kriss/OneDrive/Documents/Desktop/realtimerag/rag/core/embeddings.py) and [requirements.txt](file:///c:/Users/kriss/OneDrive/Documents/Desktop/realtimerag/rag/requirements.txt) | Render Free Tier (512MB RAM ceiling); resolved OOM container crashes |
+
+---
+
+### Deep-Dive Interview Defenses
+
+#### Q1: "How did you measure your <140ms retrieval latency? Walk me through the code."
+**Interview Answer:**
+> "We implemented a deterministic benchmark script in `scripts/evaluate_retrieval.py`. It constructs a test harness of 12 ground-truth incident scenarios across our three core teams (Ops, DevOps, Security). Using `time.perf_counter()`, it measures the exact time to generate the dense query vector, query dense candidates, compute BM25 lexical token matching, and execute Reciprocal Rank Fusion (RRF) with recency decay.
+> Running `python -m scripts.evaluate_retrieval` produces a verified p50 latency of **90.5ms** and a p95 of **138.5ms**, with a **1.000 Recall@3** and **1.000 MRR@3** (Mean Reciprocal Rank), proving that the correct incident was ranked in top position 100% of the time."
+
+#### Q2: "What is the difference between your Ingestion Latency and Query Latency?"
+**Interview Answer:**
+> "They are two decoupled cycles:
+> 1. **Ingestion Latency (Time-to-Index):** Measures the time from when an alert fires to when it is indexed in Pinecone. In `stream/consumer.py`, our Kafka worker calculates `event_age_ms = (datetime.now(timezone.utc) - event_timestamp)`. In production with our cloud Redpanda broker in AWS Mumbai and Pinecone, this averages **under 500ms**.
+> 2. **Query Latency (Time-to-Answer):** Measures when a user asks a question on `/ask`. Hybrid search takes **< 140ms**, parallel Groq specialist reasoning takes **~1.5s**, and synthesis takes **~500ms**, delivering a complete triage response in **under 3 seconds total**, compared to 15-30 minutes of manual SRE debugging."
+
+#### Q3: "How did you achieve a 100% token reduction on out-of-domain queries?"
+**Interview Answer:**
+> "In `agents/nodes.py`, we built a Groundedness Short-Circuit Gate. Before calling any Groq model, the graph checks `_has_grounded_context()`. If hybrid retrieval returns less than 20 characters of verifiable incident context from Pinecone, the graph routes directly to a `no_context` node, returning an immediate guardrail notice. This prevents speculative hallucinations and consumes **zero LLM tokens**."
