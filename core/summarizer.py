@@ -1,5 +1,7 @@
 """LLM-powered incident summarization and RCA generation."""
 
+import asyncio
+import logging
 import os
 
 from groq import AsyncGroq
@@ -10,6 +12,7 @@ from core.guardrails import sanitize_pii_and_secrets
 
 load_dotenv()
 client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
+logger = logging.getLogger(__name__)
 
 
 async def summarize_incident(text: str, metadata: dict | None = None) -> dict:
@@ -30,11 +33,23 @@ CRITICAL RULE: Do NOT make external assumptions, guess root causes, or invent re
 
 Respond ONLY with valid JSON, no markdown."""
 
-    res = await client.chat.completions.create(
-        model=LLM_MODEL,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.0,  # Zero temperature for maximum factual consistency
-    )
+    try:
+        res = await asyncio.wait_for(
+            client.chat.completions.create(
+                model=LLM_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,  # Zero temperature for maximum factual consistency
+            ),
+            timeout=15.0,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("Groq LLM call timed out after 15s — returning pending fields")
+        return {
+            "summary": text[:300],
+            "root_cause": "Pending investigation",
+            "impact": "Pending assessment",
+            "recommendation": "Reference historical RAG incidents for verified remediation solutions.",
+        }
     content = res.choices[0].message.content or "{}"
 
     import json

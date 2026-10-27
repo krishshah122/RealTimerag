@@ -33,16 +33,23 @@ class SummaryUpdate(BaseModel):
 
 
 async def _summarize_issue_in_background(event: dict) -> None:
+    """Fire-and-forget summarization — never blocks the API or other ingestions."""
     issue_id = event["id"]
     try:
-        summary_fields = await summarize_incident(
-            event["text"], event.get("metadata", {})
+        summary_fields = await asyncio.wait_for(
+            summarize_incident(event["text"], event.get("metadata", {})),
+            timeout=30.0,
         )
         await asyncio.to_thread(
             IncidentManager.update_summary, issue_id, **summary_fields
         )
         event["metadata"].update(summary_fields)
         await asyncio.to_thread(send_issue_event, event)
+    except asyncio.TimeoutError:
+        logger.warning(
+            "Background summarization timed out after 30s for %s — skipping",
+            issue_id,
+        )
     except Exception:
         logger.exception(
             "Background incident summary or vector metadata update failed for %s",
@@ -165,10 +172,8 @@ async def _ingest_issue(
             "duration_ms": round((time.perf_counter() - publish_started) * 1000, 2),
         }
 
-    background_tasks.add_task(
-        _summarize_issue_in_background,
-        event,
-    )
+    # Fire-and-forget: runs concurrently on the event loop, never blocks the API
+    asyncio.create_task(_summarize_issue_in_background(event))
     background_tasks.add_task(
         _notify_incident_in_background,
         incident,
