@@ -2,6 +2,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import os
+# Constrain PyTorch memory on Render's free tier (512 MB RAM)
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
 from fastapi import FastAPI, Body, Depends, Query, HTTPException
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,7 +27,6 @@ from core.summarizer import recommend_resolution
 from core.correlation import find_similar_incidents
 from jobs.scheduler import start_scheduler_in_thread
 import time
-import os
 import uuid
 
 print("LangSmith enabled:", os.getenv("LANGCHAIN_TRACING_V2"))

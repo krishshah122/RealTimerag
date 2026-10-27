@@ -37,9 +37,16 @@ class EmbeddingModel:
                                 "sentence-transformers is required when "
                                 "EMBEDDING_MODEL is configured."
                             ) from exc
+                        import torch, gc
+                        # Minimize memory: single thread, no grad tracking
+                        torch.set_num_threads(1)
+                        torch.set_grad_enabled(False)
                         logging.info("🔥 Loading SentenceTransformer model (ONCE)...")
                         cls._model = SentenceTransformer(EMBEDDING_MODEL)
-                        logging.info("✅ SentenceTransformer model loaded")
+                        # Switch to half-precision to halve model memory
+                        cls._model.half()
+                        logging.info("✅ SentenceTransformer model loaded (half-precision)")
+                        gc.collect()
                     else:
                         logging.info(
                             "⚠️ sentence_transformers not available — using pseudo-embeddings"
