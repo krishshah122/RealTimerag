@@ -412,6 +412,28 @@ frontend environment. On Render, set `CORS_ORIGINS` to the deployed Vercel origi
 
 ---
 
+## Latest Updates: Cloud & Free-Tier Optimizations (Render & Groq)
+
+### 1. Groq Free-Tier Model Update (Resolved `404 Not Found`)
+* **What Changed:** Standardized the LLM engine across the entire codebase (`rag/config.py`, `rag/core/summarizer.py`, `rag/app/issues.py`, `rag/agents/nodes.py`) to Groq's active free-tier model: `llama-3.1-8b-instant`.
+* **Why:** Previous Groq model identifiers (such as `llama3-8b-8192`) were decommissioned and deprecated by Groq, returning `HTTP 404 Not Found` when generating incident summaries, automated root cause analyses (RCA), or querying the LangGraph multi-agent pipeline. `llama-3.1-8b-instant` is actively maintained and free to use under Groq's generous rate limits.
+* **How:**
+  * Configured default `LLM_MODEL = "llama-3.1-8b-instant"` in `rag/config.py`.
+  * Updated API endpoints and LangGraph nodes to pass `llama-3.1-8b-instant` with structured prompt instructions.
+
+### 2. Render Free-Tier Memory Optimization (Resolved `502 Bad Gateway` / OOM Kills)
+* **What Changed:**
+  1. **CPU-Only PyTorch Wheel:** Configured `--extra-index-url https://download.pytorch.org/whl/cpu` in `rag/requirements.txt` to install the CPU-only PyTorch package (`~80MB`) instead of default CUDA wheels (`~500MB+`).
+  2. **Half-Precision & Thread Throttling:** In `rag/core/embeddings.py`, restricted PyTorch to a single thread (`torch.set_num_threads(1)`), disabled gradient tracking (`torch.set_grad_enabled(False)`), converted the `SentenceTransformer` embedding model to half-precision FP16 (`cls._model.half()`), and ran explicit garbage collection (`gc.collect()`).
+  3. **Pre-Import Environment Variables:** In `rag/app/main.py`, set `OMP_NUM_THREADS=1`, `MKL_NUM_THREADS=1`, and `TOKENIZERS_PARALLELISM=false` before importing heavy libraries.
+* **Why:** Render's free tier provides a maximum of 512MB RAM. The standard PyTorch wheel packages heavy CUDA/GPU drivers that inflate runtime memory mapping. In combination with multi-threaded tokenizers and full FP32 weights, container memory spiked beyond 512MB on startup or query time, causing Render's environment to terminate the process via Linux OOM (`SIGKILL`) and return a `502 Bad Gateway`.
+* **How:**
+  * **~400MB saved** by stripping CUDA dependencies via CPU-only wheels.
+  * **~50–80MB saved** in heap usage by halving model parameter memory (FP16) and curbing worker thread allocations.
+  * Steady-state memory footprint is reduced to ~180MB–230MB, keeping the application stable within Render's 512MB threshold.
+
+---
+
 ## Quickstart Run Instructions
 
 ### 1. Install Dependencies

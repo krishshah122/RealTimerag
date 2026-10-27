@@ -3,10 +3,25 @@ import { supabase } from "../supabaseClient";
 import { API_BASE, generateAlerts } from "../api";
 
 export default function Simulation() {
-    const [logs, setLogs] = useState([]);
+    const [logs, setLogs] = useState(() => {
+        try {
+            const saved = localStorage.getItem("simulation_live_logs");
+            return saved ? JSON.parse(saved) : [];
+        } catch {
+            return [];
+        }
+    });
     const [loading, setLoading] = useState(false);
     const [team, setTeam] = useState("Loading...");
     const [bulkCount, setBulkCount] = useState(10);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem("simulation_live_logs", JSON.stringify(logs.slice(0, 50)));
+        } catch (e) {
+            console.error("Failed to save simulation logs", e);
+        }
+    }, [logs]);
 
     useEffect(() => {
         supabase.auth.getSession().then(({ data: { session } }) => {
@@ -343,9 +358,27 @@ export default function Simulation() {
 
             {/* Live Event Log */}
             <div className="glass-card">
-                <div className="section-title green" style={{ fontSize: 18 }}>
-                    <span className="icon">📡</span>
-                    Live Event Log
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <div className="section-title green" style={{ fontSize: 18, margin: 0 }}>
+                        <span className="icon">📡</span>
+                        Live Event Log
+                    </div>
+                    {logs.length > 0 && (
+                        <button
+                            onClick={() => setLogs([])}
+                            style={{
+                                background: 'transparent',
+                                border: '1px solid var(--border-color)',
+                                color: 'var(--text-muted)',
+                                padding: '4px 10px',
+                                borderRadius: 6,
+                                fontSize: 12,
+                                cursor: 'pointer',
+                            }}
+                        >
+                            Clear Log
+                        </button>
+                    )}
                 </div>
                 {logs.length === 0 ? (
                     <div className="empty-state">No events triggered yet.</div>

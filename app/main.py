@@ -57,6 +57,8 @@ app.middleware("http")(auth_middleware)
 cors_origins = {
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "https://real-timerag.vercel.app",
+    "https://realtimerag.vercel.app",
 }
 cors_origins.update(
     origin.strip()
@@ -67,6 +69,7 @@ cors_origins.update(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=sorted(cors_origins),
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
