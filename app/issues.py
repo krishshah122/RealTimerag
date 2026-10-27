@@ -1,9 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
-from datetime import datetime
-import uuid
 import asyncio
+import logging
 import time
+import uuid
+from datetime import datetime
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 from stream.producer import send_issue_event
 from app.auth import get_current_user, UserContext
@@ -16,6 +18,7 @@ from core.notifications import notify_incident_created
 from core.summarizer import summarize_incident
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class StatusTransition(BaseModel):
@@ -29,7 +32,39 @@ class SummaryUpdate(BaseModel):
     recommendation: str | None = None
 
 
-async def _ingest_issue(issue: dict, user: UserContext) -> dict:
+async def _summarize_issue_in_background(event: dict) -> None:
+    issue_id = event["id"]
+    try:
+        summary_fields = await summarize_incident(
+            event["text"], event.get("metadata", {})
+        )
+        await asyncio.to_thread(
+            IncidentManager.update_summary, issue_id, **summary_fields
+        )
+        event["metadata"].update(summary_fields)
+        await asyncio.to_thread(send_issue_event, event)
+    except Exception:
+        logger.exception(
+            "Background incident summary or vector metadata update failed for %s",
+            issue_id,
+        )
+
+
+def _notify_incident_in_background(
+    incident: dict, user_id: str, user_email: str | None
+) -> None:
+    try:
+        notify_incident_created(incident, user_id, user_email)
+    except Exception:
+        logger.exception(
+            "Background incident notification failed for %s",
+            incident.get("incident_id"),
+        )
+
+
+async def _ingest_issue(
+    issue: dict, user: UserContext, background_tasks: BackgroundTasks
+) -> dict:
     ingest_started = time.perf_counter()
     ingest_started_at = datetime.utcnow().isoformat()
     team_tag = user.team or "unassigned"
@@ -40,7 +75,8 @@ async def _ingest_issue(issue: dict, user: UserContext) -> dict:
     status = metadata.get("status", IncidentStatus.OPEN.value)
 
     # Create lifecycle record
-    incident = IncidentManager.create(
+    incident = await asyncio.to_thread(
+        IncidentManager.create,
         incident_id=issue_id,
         text=issue["text"],
         team=team_tag,
@@ -53,21 +89,24 @@ async def _ingest_issue(issue: dict, user: UserContext) -> dict:
     )
 
     # Correlation
-    group = correlate_on_ingest(issue_id, issue["text"], {**metadata, "service": service})
+    group = await asyncio.to_thread(
+        correlate_on_ingest,
+        issue_id,
+        issue["text"],
+        {**metadata, "service": service},
+    )
     incident["correlation_group"] = group
-
-    # Summarization agent (async, non-blocking for response)
-    try:
-        summary_fields = await summarize_incident(issue["text"], {**metadata, "team_tag": team_tag})
-        IncidentManager.update_summary(issue_id, **summary_fields)
-        incident.update(summary_fields)
-    except Exception as e:
-        print(f"Summarization failed (non-fatal): {e}")
 
     # If status provided in metadata (simulation), apply transition
     if status != IncidentStatus.OPEN.value:
         try:
-            IncidentManager.transition_status(issue_id, status, user.id, user.email)
+            await asyncio.to_thread(
+                IncidentManager.transition_status,
+                issue_id,
+                status,
+                user.id,
+                user.email,
+            )
             incident["status"] = status.upper()
         except ValueError:
             pass
@@ -100,7 +139,8 @@ async def _ingest_issue(issue: dict, user: UserContext) -> dict:
     }
 
     try:
-        AnalyticsManager.track_issue(
+        await asyncio.to_thread(
+            AnalyticsManager.track_issue,
             issue_id=issue_id,
             issue_type=event["type"],
             team=team_tag,
@@ -108,41 +148,51 @@ async def _ingest_issue(issue: dict, user: UserContext) -> dict:
             created_by_user_id=user.id,
             created_by_email=user.email,
         )
-    except Exception as e:
-        print(f"Analytics tracking failed: {e}")
+    except Exception:
+        logger.exception("Analytics tracking failed for incident %s", issue_id)
 
     try:
         publish_started = time.perf_counter()
         publish_result = {
             "status": "published",
-            **send_issue_event(event),
+            **await asyncio.to_thread(send_issue_event, event),
             "duration_ms": round((time.perf_counter() - publish_started) * 1000, 2),
         }
-    except Exception as e:
-        print(f"Kafka send failed: {e}")
+    except Exception:
+        logger.exception("Kafka send failed for incident %s", issue_id)
         publish_result = {
             "status": "failed",
             "duration_ms": round((time.perf_counter() - publish_started) * 1000, 2),
         }
 
-    # Notifications
-    try:
-        notify_incident_created(incident, user.id, user.email)
-    except Exception as e:
-        print(f"Notification failed: {e}")
+    background_tasks.add_task(
+        _summarize_issue_in_background,
+        event,
+    )
+    background_tasks.add_task(
+        _notify_incident_in_background,
+        incident,
+        user.id,
+        user.email,
+    )
 
     return {
         "status": "logged",
         "event": event,
         "incident": incident,
         "kafka_publish": publish_result,
+        "summary_status": "pending",
         "ingest_elapsed_ms": round((time.perf_counter() - ingest_started) * 1000, 2),
     }
 
 
 @router.post("/log_issue")
-async def log_issue(issue: dict, user: UserContext = Depends(get_current_user)):
-    return await _ingest_issue(issue, user)
+async def log_issue(
+    issue: dict,
+    background_tasks: BackgroundTasks,
+    user: UserContext = Depends(get_current_user),
+):
+    return await _ingest_issue(issue, user, background_tasks)
 
 
 @router.get("/issues/mine")

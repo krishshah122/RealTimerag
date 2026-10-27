@@ -1,6 +1,6 @@
 """Admin and simulation API endpoints."""
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query
 
 from app.auth import get_current_user, UserContext
 from app.rbac import require_roles
@@ -48,6 +48,7 @@ async def vector_status(user: UserContext = Depends(require_roles("admin"))):
 
 @router.post("/simulation/generate")
 async def generate_simulated_alerts(
+    background_tasks: BackgroundTasks,
     count: int = Query(10, ge=1, le=100),
     user: UserContext = Depends(get_current_user),
 ):
@@ -56,12 +57,17 @@ async def generate_simulated_alerts(
     alerts = generate_batch(count, team=user.team)
     results = []
     for alert in alerts:
-        results.append(await _ingest_issue(alert, user))
+        results.append(await _ingest_issue(alert, user, background_tasks))
     return {"generated": len(results), "incidents": results}
 
 
 @router.post("/simulation/single")
-async def generate_single_alert(user: UserContext = Depends(get_current_user)):
+async def generate_single_alert(
+    background_tasks: BackgroundTasks,
+    user: UserContext = Depends(get_current_user),
+):
     from app.issues import _ingest_issue
 
-    return await _ingest_issue(generate_alert(team=user.team), user)
+    return await _ingest_issue(
+        generate_alert(team=user.team), user, background_tasks
+    )
