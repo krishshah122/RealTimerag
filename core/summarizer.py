@@ -15,6 +15,24 @@ client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
 logger = logging.getLogger(__name__)
 
 
+async def _chat_completion_with_fallback(**kwargs):
+    try:
+        return await client.chat.completions.create(**kwargs)
+    except Exception as e:
+        err_str = str(e)
+        if "model_not_found" in err_str or "404" in err_str:
+            fallback = "openai/gpt-oss-20b"
+            if kwargs.get("model") != fallback:
+                logger.warning(
+                    "Model %s returned 404 on Groq. Retrying with verified fallback %s",
+                    kwargs.get("model"),
+                    fallback,
+                )
+                kwargs["model"] = fallback
+                return await client.chat.completions.create(**kwargs)
+        raise
+
+
 async def summarize_incident(text: str, metadata: dict | None = None) -> dict:
     """Generate structured summary fields for an incident."""
     meta = metadata or {}
@@ -35,7 +53,7 @@ Respond ONLY with valid JSON, no markdown."""
 
     try:
         res = await asyncio.wait_for(
-            client.chat.completions.create(
+            _chat_completion_with_fallback(
                 model=LLM_MODEL,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,  # Zero temperature for maximum factual consistency
@@ -94,7 +112,7 @@ Existing analysis:
 
 Format the RCA with sections: Executive Summary, Timeline, Root Cause, Impact, Resolution, Prevention."""
 
-    res = await client.chat.completions.create(
+    res = await _chat_completion_with_fallback(
         model=LLM_MODEL,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3,
@@ -120,7 +138,7 @@ Historical context:
 
 Provide actionable remediation steps in 3-5 bullet points."""
 
-    res = await client.chat.completions.create(
+    res = await _chat_completion_with_fallback(
         model=LLM_MODEL,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.2,

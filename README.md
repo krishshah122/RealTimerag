@@ -84,7 +84,7 @@ agent coordination, and user-facing request sequence, see
 |---|---|---|
 | API Gateway | FastAPI | >= 0.115 |
 | AI Orchestration | LangGraph | >= 0.2.0 |
-| LLM Engine | Groq (llama-3.1-8b-instant) | >= 0.13.0 |
+| LLM Engine | Groq (openai/gpt-oss-20b) | >= 0.13.0 |
 | Embedding Engine | BAAI/bge-small-en-v1.5 (SentenceTransformers) | >= 3.3.0 |
 | Vector DB | **Pinecone** (default), Qdrant, or FAISS (optional fallback) | Pinecone serverless / Qdrant / faiss-cpu |
 | Lexical Search | rank-bm25 | >= 0.2.2 |
@@ -349,7 +349,7 @@ EMBEDDING_DIM=384
 
 # LangGraph / model
 RAG_MULTI_AGENT_ENABLED=true
-LLM_MODEL=llama-3.1-8b-instant
+LLM_MODEL=openai/gpt-oss-20b
 
 # Kafka incident event stream
 KAFKA_ISSUES_TOPIC=live_issues
@@ -415,11 +415,11 @@ frontend environment. On Render, set `CORS_ORIGINS` to the deployed Vercel origi
 ## Latest Updates: Cloud & Free-Tier Optimizations (Render & Groq)
 
 ### 1. Groq Free-Tier Model Update (Resolved `404 Not Found`)
-* **What Changed:** Standardized the LLM engine across the entire codebase (`rag/config.py`, `rag/core/summarizer.py`, `rag/app/issues.py`, `rag/agents/nodes.py`) to Groq's active free-tier model: `llama-3.1-8b-instant`.
-* **Why:** Previous Groq model identifiers (such as `llama3-8b-8192`) were decommissioned and deprecated by Groq, returning `HTTP 404 Not Found` when generating incident summaries, automated root cause analyses (RCA), or querying the LangGraph multi-agent pipeline. `llama-3.1-8b-instant` is actively maintained and free to use under Groq's generous rate limits.
+* **What Changed:** Standardized the LLM engine across the entire codebase (`rag/config.py`, `rag/core/summarizer.py`, `rag/app/issues.py`, `rag/agents/nodes.py`) to Groq's active free-tier model: `openai/gpt-oss-20b`.
+* **Why:** Previous Groq model identifiers (such as `llama3-8b-8192`) were decommissioned and deprecated by Groq, returning `HTTP 404 Not Found` when generating incident summaries, automated root cause analyses (RCA), or querying the LangGraph multi-agent pipeline. `openai/gpt-oss-20b` is actively maintained and free to use under Groq's generous rate limits.
 * **How:**
-  * Configured default `LLM_MODEL = "llama-3.1-8b-instant"` in `rag/config.py`.
-  * Updated API endpoints and LangGraph nodes to pass `llama-3.1-8b-instant` with structured prompt instructions.
+  * Configured default `LLM_MODEL = "openai/gpt-oss-20b"` in `rag/config.py`.
+  * Updated API endpoints and LangGraph nodes to pass `openai/gpt-oss-20b` with structured prompt instructions.
 
 ### 2. Render Free-Tier Memory Optimization (Resolved `502 Bad Gateway` / OOM Kills)
 * **What Changed:**

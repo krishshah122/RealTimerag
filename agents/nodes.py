@@ -131,6 +131,19 @@ def _no_context_answer(state):
     }
 
 
+async def _safe_chat_completion(**kwargs):
+    try:
+        return await client.chat.completions.create(**kwargs)
+    except Exception as e:
+        err_str = str(e)
+        if "model_not_found" in err_str or "404" in err_str:
+            fallback = "openai/gpt-oss-20b"
+            if kwargs.get("model") != fallback:
+                kwargs["model"] = fallback
+                return await client.chat.completions.create(**kwargs)
+        raise
+
+
 async def _run_specialist(state, role: str, instructions: str, output_key: str):
     context = sanitize_pii_and_secrets("\n".join(state["docs"]))
     prompt = f"""{_system_prompt_for_team(state.get("team"))}
@@ -148,13 +161,14 @@ Incident evidence:
 Question:
 {state['query']}"""
 
-    response = await client.chat.completions.create(
+    response = await _safe_chat_completion(
         model=LLM_MODEL,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.2,
-        max_tokens=250,
+        max_tokens=1000,
     )
-    return {output_key: response.choices[0].message.content or ""}
+    msg = response.choices[0].message
+    return {output_key: msg.content or getattr(msg, "reasoning", "") or ""}
 
 
 @traceable(name="incident_analyst")
@@ -192,13 +206,14 @@ Remediation analysis:
 
 Question:
 {state["query"]}"""
-    response = await client.chat.completions.create(
+    response = await _safe_chat_completion(
         model=LLM_MODEL,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.2,
-        max_tokens=500,
+        max_tokens=1200,
     )
-    return {"answer": response.choices[0].message.content}
+    msg = response.choices[0].message
+    return {"answer": msg.content or getattr(msg, "reasoning", "") or ""}
 
 
 @traceable(name="answer_node")
@@ -229,7 +244,7 @@ Context:
 Question:
 {state['query']}"""
 
-    res = await client.chat.completions.create(
+    res = await _safe_chat_completion(
         model=LLM_MODEL,
         messages=[{"role": "user", "content": prompt}],
     )
@@ -255,7 +270,7 @@ async def summarize_node(state):
 Incidents:
 {context}"""
 
-    res = await client.chat.completions.create(
+    res = await _safe_chat_completion(
         model=LLM_MODEL,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.2,
