@@ -347,6 +347,11 @@ EMBEDDING_DIM=384
 RAG_MULTI_AGENT_ENABLED=true
 LLM_MODEL=llama-3.1-8b-instant
 
+# Kafka incident event stream
+KAFKA_ISSUES_TOPIC=live_issues
+KAFKA_CONSUMER_GROUP_ID=incident-vector-indexer
+# Also set the Redpanda bootstrap/SASL variables required by stream/kafka_config.py.
+
 # Optional Alert Notification Dispatch Channels
 SLACK_WEBHOOK_URL=
 TEAMS_WEBHOOK_URL=
@@ -359,6 +364,35 @@ LANGCHAIN_TRACING_V2=true
 LANGSMITH_PROJECT=incident-intelligence
 LANGCHAIN_API_KEY=your_langchain_api_key
 ```
+
+For an isolated end-to-end test, create a separate Redpanda topic (for example
+`live_issues_eval`) and Pinecone namespace (for example `e2e-eval`). Set
+`KAFKA_ISSUES_TOPIC` and `PINECONE_NAMESPACE` to those same values on the staging
+API and consumer. Give the consumer its own group, such as
+`KAFKA_CONSUMER_GROUP_ID=incident-indexer-eval`. The API and consumer must use the
+same topic and namespace or the event will not reach the index queried by the API.
+
+The API response includes `kafka_publish.status` and, on broker acknowledgement,
+the topic, partition, and offset. The consumer logs the incident ID, upsert/commit
+duration, event age at indexing, and rolling throughput. A successful API response
+without `kafka_publish.status=published` does not confirm broker delivery.
+
+### Measuring retrieval quality locally
+
+Run the included deterministic synthetic retrieval benchmark from the `rag`
+directory:
+
+```bash
+python -m scripts.evaluate_retrieval
+```
+
+It reports Recall@3, Precision@3, MRR@3, and local p50/p95 retrieval latency over
+12 synthetic incidents and 6 labeled questions. It uses the configured embedding
+model and in-memory dense search; it does not call Redpanda, Pinecone, or Groq, so
+these numbers are a smoke-test baseline, not end-to-end or production benchmarks.
+For answer-quality evaluation, create a larger sanitized dataset with each
+question's expected answer and relevant incident IDs, then score actual API answers
+and retrieved contexts with RAGAS or DeepEval.
 
 ### Frontend Setup (`rag/frontend/.env`)
 

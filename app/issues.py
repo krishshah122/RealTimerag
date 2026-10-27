@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from datetime import datetime
 import uuid
 import asyncio
+import time
 
 from stream.producer import send_issue_event
 from app.auth import get_current_user, UserContext
@@ -29,6 +30,8 @@ class SummaryUpdate(BaseModel):
 
 
 async def _ingest_issue(issue: dict, user: UserContext) -> dict:
+    ingest_started = time.perf_counter()
+    ingest_started_at = datetime.utcnow().isoformat()
     team_tag = user.team or "unassigned"
     issue_id = str(uuid.uuid4())[:8]
     metadata = issue.get("metadata", {}) or {}
@@ -80,6 +83,7 @@ async def _ingest_issue(issue: dict, user: UserContext) -> dict:
             "created_by_user_id": user.id,
             "created_by_email": user.email,
             "timestamp": datetime.utcnow().isoformat(),
+            "ingest_started_at": ingest_started_at,
             "status": incident.get("status", IncidentStatus.OPEN.value),
             "severity": severity,
             "service": service,
@@ -108,9 +112,18 @@ async def _ingest_issue(issue: dict, user: UserContext) -> dict:
         print(f"Analytics tracking failed: {e}")
 
     try:
-        send_issue_event(event)
+        publish_started = time.perf_counter()
+        publish_result = {
+            "status": "published",
+            **send_issue_event(event),
+            "duration_ms": round((time.perf_counter() - publish_started) * 1000, 2),
+        }
     except Exception as e:
         print(f"Kafka send failed: {e}")
+        publish_result = {
+            "status": "failed",
+            "duration_ms": round((time.perf_counter() - publish_started) * 1000, 2),
+        }
 
     # Notifications
     try:
@@ -118,7 +131,13 @@ async def _ingest_issue(issue: dict, user: UserContext) -> dict:
     except Exception as e:
         print(f"Notification failed: {e}")
 
-    return {"status": "logged", "event": event, "incident": incident}
+    return {
+        "status": "logged",
+        "event": event,
+        "incident": incident,
+        "kafka_publish": publish_result,
+        "ingest_elapsed_ms": round((time.perf_counter() - ingest_started) * 1000, 2),
+    }
 
 
 @router.post("/log_issue")

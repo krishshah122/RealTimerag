@@ -24,7 +24,7 @@ def _route_after_retrieval(state, mode: str, multi_agent: bool) -> str | list[st
         return "summarize"
     if multi_agent:
         return ["incident_analyst", "remediation_analyst"]
-    return "answer"
+    return "answer_generation"
 
 
 def _blocked_node(state):
@@ -39,7 +39,7 @@ def build_graph(vector_store, mode: str = "ask", multi_agent: bool | None = None
 
     graph = StateGraph(RAGState)
     graph.add_node("retrieve", lambda state: retrieve_node(state, vector_store))
-    graph.add_node("answer", answer_node)
+    graph.add_node("answer_generation", answer_node)
     graph.add_node("summarize", summarize_node)
     graph.add_node("blocked", _blocked_node)
     graph.add_node("no_context", _no_context_answer)
@@ -48,7 +48,7 @@ def build_graph(vector_store, mode: str = "ask", multi_agent: bool | None = None
         "blocked": "blocked",
         "no_context": "no_context",
         "summarize": "summarize",
-        "answer": "answer",
+        "answer_generation": "answer_generation",
     }
     if multi_agent and mode != "summarize":
         route_map.update(
@@ -71,7 +71,7 @@ def build_graph(vector_store, mode: str = "ask", multi_agent: bool | None = None
         graph.add_edge("remediation_analyst", "synthesize")
         graph.add_edge("synthesize", END)
 
-    graph.add_edge("answer", END)
+    graph.add_edge("answer_generation", END)
     graph.add_edge("summarize", END)
     graph.add_edge("blocked", END)
     graph.add_edge("no_context", END)

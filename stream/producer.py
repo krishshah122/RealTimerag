@@ -1,6 +1,6 @@
 import json
 
-from stream.kafka_config import get_kafka_config
+from stream.kafka_config import get_issue_topic, get_kafka_config
 
 producer = None
 
@@ -19,5 +19,10 @@ def _get_producer():
 
 def send_issue_event(event: dict):
     p = _get_producer()
-    p.send("live_issues", event)
-    p.flush()
+    future = p.send(get_issue_topic(), event)
+    metadata = future.get(timeout=10)
+    return {
+        "topic": metadata.topic,
+        "partition": metadata.partition,
+        "offset": metadata.offset,
+    }

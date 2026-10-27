@@ -57,7 +57,7 @@ flowchart LR
         BRANCH -->|ask and multi-agent enabled| RA[remediation_analyst]
         IA --> SYNTH[synthesize]
         RA --> SYNTH
-        BRANCH -->|ask and multi-agent disabled| ANSWER[answer]
+        BRANCH -->|ask and multi-agent disabled| ANSWER[answer_generation]
         BRANCH -->|summarize request| SUMMARY[summarize]
         BLOCKED --> RESPONSE[Graph result: answer]
         EMPTY --> RESPONSE
@@ -81,7 +81,7 @@ module initializes. The graph is then reused; its state is not.
 | `incident_analyst` | In multi-agent `/ask`, identify evidence about matching incidents, status, severity, recency, root cause, and impact. | `incident_analysis` |
 | `remediation_analyst` | In multi-agent `/ask`, identify historical remediation evidence and distinguish it from cautious recommendations. | `remediation_analysis` |
 | `synthesize` | Combine the two specialist notes into one response, using only those notes and stating gaps or conflicts. | `answer` |
-| `answer` | In single-agent `/ask`, write the direct response grounded in retrieved incident text. | `answer` |
+| `answer_generation` | In single-agent `/ask`, write the direct response grounded in retrieved incident text. | `answer` |
 | `summarize` | Produce an executive summary, root-cause patterns, impact assessment, and recommended remediation from retrieved text. | `answer` |
 
 ### What each node does and why
@@ -97,7 +97,7 @@ module initializes. The graph is then reused; its state is not.
 * **`no_context` is the evidence-missing exit.** It returns a groundedness message
   when retrieval produced no usable incident text. It avoids asking an LLM to invent
   an answer without evidence and does not call Groq.
-* **`answer` is the concise single-agent path.** One model call receives the query
+* **`answer_generation` is the concise single-agent path.** One model call receives the query
   and retrieved context and returns a direct grounded response. Use this when lower
   latency and fewer model calls matter more than separating analysis roles.
 * **`incident_analyst` and `remediation_analyst` are independent parallel
@@ -121,7 +121,7 @@ module initializes. The graph is then reused; its state is not.
 |---|---|---:|---|
 | Unsafe input | `blocked` | 0 | Explain the guardrail rejection without retrieval-backed generation. |
 | No usable retrieved docs | `no_context` | 0 | Avoid an ungrounded model answer and unnecessary token use. |
-| `/ask`, `RAG_MULTI_AGENT_ENABLED=false` | `answer` | 1 | Faster and simpler direct grounded response. |
+| `/ask`, `RAG_MULTI_AGENT_ENABLED=false` | `answer_generation` | 1 | Faster and simpler direct grounded response. |
 | `/ask`, `RAG_MULTI_AGENT_ENABLED=true` | `incident_analyst` + `remediation_analyst` in parallel, then `synthesize` | 3 | Explicitly separate incident evidence from remediation evidence before composing. |
 | `/summarize` with retrieved docs | `summarize` | 1 | Produce a structured overview rather than a question-specific response. |
 
@@ -133,7 +133,7 @@ flowchart TD
     retrieve -->|blocked_reason present| blocked
     retrieve -->|docs empty| no_context
     retrieve -->|mode is summarize| summarize
-    retrieve -->|ask and multi-agent false| answer
+    retrieve -->|ask and multi-agent false| answer_generation
     retrieve -->|ask and multi-agent true| incident_analyst
     retrieve -->|ask and multi-agent true| remediation_analyst
     incident_analyst --> synthesize
@@ -141,7 +141,7 @@ flowchart TD
     blocked --> END
     no_context --> END
     summarize --> END
-    answer --> END
+    answer_generation --> END
     synthesize --> END
 ```
 
@@ -180,6 +180,14 @@ the question, documents, and analysis fields are initialized/merged per request.
 There is no LangGraph checkpoint store, conversation/thread memory, or retained
 chat history in this flow. The request ID is used for analytics and optional
 LangSmith trace metadata; it is not a graph conversation key.
+
+LangSmith is wired to the question-answering path: `_handle_ask` and graph/retrieval
+functions use `@traceable`. With tracing enabled and a valid LangSmith API key, an
+`/ask` or `/summarize` run can be inspected as a trace tree, including retrieval
+and graph-node timings. This is observability, not an accuracy evaluator. The
+Redpanda producer/consumer boundary is not currently one distributed LangSmith
+trace; consumer indexing duration, event age, and throughput are emitted to its
+process log instead.
 
 `ainvoke()` returns the final merged state mapping. The current `/ask` and
 `/summarize` routes return that mapping as JSON, so the response includes `answer`
@@ -256,6 +264,9 @@ benchmarked if the corpus or update rate grows substantially.
 5. LangGraph runs `retrieve`, selects the blocked/no-context/single-agent/
    multi-agent branch, and returns an `answer`.
 6. The API records query timing/analytics and returns the final graph state as JSON.
+   The existing dashboard's `accuracy` value is currently a response-length
+   heuristic, not a measured answer-quality metric; do not report it as accuracy.
+   Use labeled evaluation data with RAGAS or DeepEval for answer quality.
 
 ### `/summarize`
 

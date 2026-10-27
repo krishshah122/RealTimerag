@@ -56,3 +56,21 @@ def get_kafka_config() -> dict:
         raise RuntimeError("Set KAFKA_BOOTSTRAP_SERVERS to a Kafka broker address.")
 
     return config
+
+
+def get_issue_topic() -> str:
+    """Return the Kafka topic used for incident events."""
+    topic = os.getenv("KAFKA_ISSUES_TOPIC", "live_issues").strip()
+    if not topic:
+        raise RuntimeError("KAFKA_ISSUES_TOPIC must not be empty.")
+    return topic
+
+
+def get_consumer_group_id() -> str:
+    """Return the Kafka consumer group used for incident indexing."""
+    group_id = os.getenv(
+        "KAFKA_CONSUMER_GROUP_ID", "incident-vector-indexer"
+    ).strip()
+    if not group_id:
+        raise RuntimeError("KAFKA_CONSUMER_GROUP_ID must not be empty.")
+    return group_id

@@ -116,6 +116,12 @@ class GraphWorkflowTests(unittest.TestCase):
             ),
             "summarize",
         )
+        self.assertEqual(
+            graph._route_after_retrieval(
+                {"docs": ["evidence"]}, mode="ask", multi_agent=False
+            ),
+            "answer_generation",
+        )
 
 
 if __name__ == "__main__":
