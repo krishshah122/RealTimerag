@@ -29,11 +29,12 @@ flowchart LR
         AUTH --> INC[IncidentManager]
         INC --> SQLITE[(SQLite incidents and timeline)]
         AUTH --> CORR[Correlation group]
-        AUTH -->|await| TRIAGE[Groq incident summarization]
-        TRIAGE -->|update summary fields| SQLITE
         AUTH --> METRICS[SQLite issue analytics]
-        AUTH --> WEB[Web notification]
         AUTH -->|publish live_issues| BUS[Redpanda / Kafka]
+        API -->|after response| TRIAGE[Background Groq summary]
+        TRIAGE -->|update summary fields| SQLITE
+        TRIAGE -->|republish enriched event| BUS
+        API -->|after response| WEB[Web notification]
         BUS --> CONSUMER[stream.consumer]
         CONSUMER --> EMBED[SentenceTransformer]
         EMBED --> INDEX[(Pinecone, Qdrant, or FAISS)]
@@ -296,21 +297,30 @@ sequenceDiagram
     Client->>API: Authenticated incident text and metadata
     API->>DB: Create incident and created timeline event
     API->>DB: Assign service/error correlation group
-    API->>LLM: Await factual summary fields (failure is non-fatal)
+    API->>DB: Track issue analytics
+    API->>Broker: Publish initial event and await acknowledgement in worker thread
+    API-->>Client: Return incident, Kafka acknowledgement, and summary_status=pending
+    Note over API,LLM: Background follow-up runs after the response
+    API->>LLM: Generate factual summary
     LLM-->>API: Summary, root cause, impact, recommendation
     API->>DB: Update incident summary fields
-    API->>DB: Track issue analytics
-    API->>Broker: Publish enriched live_issues event
-    API-->>Client: Return incident and event
+    API->>Broker: Republish same incident ID with enriched metadata
+    API->>Client: Store notification in background
     Broker->>Worker: Deliver event
     Worker->>Store: Embed text and upsert text plus metadata
 ```
 
 The issue route writes the SQLite lifecycle record before publishing the event.
-The vector index is populated by the separately run consumer, so a newly created
-incident may not be searchable immediately. The producer logs and skips the event
-when Kafka is unavailable; successful SQLite persistence does not itself guarantee
-that a vector point was indexed.
+The producer waits for Redpanda's broker acknowledgement in a worker thread, so
+Kafka I/O does not block the FastAPI event loop. Groq summarization and
+notifications run as post-response FastAPI background tasks. The initial event can
+be indexed before summary metadata is ready; after summarization, the API updates
+SQLite and republishes the same incident ID with enriched metadata, which the
+consumer upserts into the vector store. In-process background tasks can be lost if
+the API restarts before they finish. The vector index is populated by the separately
+run consumer, so a newly created incident may not be searchable immediately.
+Successful SQLite persistence does not itself guarantee Kafka publication or
+vector indexing; check the `kafka_publish` result and consumer logs.
 
 The status update route transitions the incident in SQLite and replaces its vector
 point with updated status metadata. The cleanup scheduler archives old resolved

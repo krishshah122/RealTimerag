@@ -16,7 +16,7 @@ Unlike traditional RAG systems that rely on static documents, this platform cont
 | Real-time ingestion | Incidents flow through Kafka/Redpanda into the vector index |
 | Incident lifecycle | `OPEN` -> `INVESTIGATING` -> `MITIGATED` -> `RESOLVED` -> `CLOSED` |
 | Time-aware retrieval | Recency-weighted hybrid search (semantic + BM25 + decay) |
-| Summarization agent | Auto-generates summary, root cause, impact, and recommendations |
+| Summarization agent | Generates summary, root cause, impact, and recommendations asynchronously after the API acknowledges ingestion |
 | Smart correlation | Groups related incidents by service and error patterns |
 | Similar incidents | "Have we seen this before?" via semantic search |
 | Resolution recommendations | LLM suggestions from historical similar incidents |
@@ -155,6 +155,10 @@ rag/
   `stream.consumer` process, which embeds and indexes incident text. Indexing is
   therefore asynchronous relative to publication. If the broker is unavailable, the
   producer logs and skips publication; the SQLite incident record may still exist.
+- The ingestion API waits for Kafka's publish acknowledgement but performs the
+  blocking Kafka client call in a worker thread. Groq incident summarization and
+  notifications run after the API response; summary fields are later written to
+  SQLite and republished as metadata for the same incident ID.
 - **LangGraph state is request-scoped**. It is initialized for each `/ask` or
   `/summarize` request, merged from node result dictionaries during that graph run,
   and is not a persistent conversation history or cross-request memory store.
@@ -171,7 +175,7 @@ rag/
 ### Incidents & Ingestion
 | Method | Path | Description |
 |---|---|---|
-| POST | `/log_issue` | Ingest real-time incident (lifecycle + Kafka topic + automatic AI summarization) |
+| POST | `/log_issue` | Create lifecycle record, publish to Kafka, then asynchronously generate the AI summary |
 | GET | `/incidents` | List incidents (support filtering by status, severity, and team tags) |
 | GET | `/incidents/{id}` | Detailed incident analysis + timeline events + correlated incidents |
 | PATCH | `/incidents/{id}/status` | Execute lifecycle state transitions |
